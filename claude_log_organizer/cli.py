@@ -30,6 +30,9 @@ Examples:
   # Clear processed file history
   claude-log-organizer clear
 
+  # Generate timeline diagram for a specific date
+  claude-log-organizer timeline 2026-02-19
+
 For more information: https://github.com/yourusername/claude-log-organizer
         """,
     )
@@ -100,6 +103,21 @@ For more information: https://github.com/yourusername/claude-log-organizer
         help="Config file path (default: config.yaml)",
     )
 
+    # timeline command
+    timeline_parser = subparsers.add_parser(
+        "timeline", help="Generate timeline diagram (.drawio) for a date"
+    )
+    timeline_parser.add_argument(
+        "date", type=str, help="Date in YYYY-MM-DD format"
+    )
+    timeline_parser.add_argument(
+        "-c",
+        "--config",
+        type=Path,
+        default=Path("config.yaml"),
+        help="Config file path (default: config.yaml)",
+    )
+
     args = parser.parse_args()
 
     # If no command specified, show help
@@ -119,6 +137,8 @@ For more information: https://github.com/yourusername/claude-log-organizer
             handle_batch(args)
         elif args.command == "clear":
             handle_clear(args)
+        elif args.command == "timeline":
+            handle_timeline(args)
     except KeyboardInterrupt:
         print("\nInterrupted by user")
         sys.exit(0)
@@ -225,6 +245,41 @@ def handle_clear(args):
     tracker.clear()
 
     print("✓ Cleared processed file history")
+
+
+def handle_timeline(args):
+    """Handle timeline command.
+
+    Args:
+        args: Parsed command-line arguments
+    """
+    from datetime import date as dt_date
+    from claude_log_organizer.generators.timeline_diagram import TimelineDiagramGenerator
+
+    try:
+        target_date = dt_date.fromisoformat(args.date)
+    except ValueError:
+        print(f"Error: Invalid date format: {args.date} (expected YYYY-MM-DD)", file=sys.stderr)
+        sys.exit(1)
+
+    config_path = args.config if args.config.exists() else None
+    config = Config(config_path)
+
+    output_dir = Path(config.get("output.directory", "./tasks"))
+    task_files = sorted(output_dir.glob(f"task-{args.date}_*.md"))
+
+    if not task_files:
+        print(f"No task files found for {args.date} in {output_dir}")
+        sys.exit(1)
+
+    print(f"Found {len(task_files)} task files for {args.date}")
+
+    generator = TimelineDiagramGenerator()
+    summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+    output_path = summaries_dir / f"daily-{args.date}_timeline.drawio"
+
+    generator.generate(task_files, f"daily-{args.date}", output_path)
+    print(f"✓ Timeline saved: {output_path}")
 
 
 if __name__ == "__main__":

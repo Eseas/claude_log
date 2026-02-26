@@ -399,7 +399,7 @@ class InteractiveCLI:
         """Select analysis type.
 
         Returns:
-            'summary' or 'efficiency' or None if cancelled
+            'summary', 'efficiency', 'timeline', or None if cancelled
         """
         questions = [
             inquirer.List(
@@ -408,6 +408,7 @@ class InteractiveCLI:
                 choices=[
                     ("일반 요약 - 세션 작업 내용 요약", "summary"),
                     ("효율성 분석 - 프롬프트 효율성 + 개선 제안", "efficiency"),
+                    ("타임라인 다이어그램 - 시간대별 작업 시각화 (.drawio)", "timeline"),
                     ("취소", "cancel"),
                 ],
             )
@@ -1084,6 +1085,11 @@ class InteractiveCLI:
         if not analysis_type:
             return
 
+        # Timeline diagram doesn't need AI
+        if analysis_type == "timeline":
+            self._generate_timeline_diagram(selected_files, range_label)
+            return
+
         ai_method = self._select_ai_method()
         if not ai_method:
             return
@@ -1106,6 +1112,35 @@ class InteractiveCLI:
                 if not api_key:
                     return
                 self._request_date_summary_with_api(selected_files, range_label, api_key)
+
+    def _generate_timeline_diagram(self, files: List[Path], range_label: str):
+        """Generate timeline diagram without AI.
+
+        Args:
+            files: List of task files
+            range_label: Descriptive label for the date range
+        """
+        from claude_log_organizer.generators.timeline_diagram import TimelineDiagramGenerator
+
+        print(f"\n⏳ 타임라인 다이어그램 생성 중...\n")
+
+        try:
+            generator = TimelineDiagramGenerator()
+            config = Config(self.config_path) if self.config_path.exists() else Config(None)
+            summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+            summaries_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path = summaries_dir / f"{range_label}_timeline.drawio"
+            generator.generate(files, range_label, output_path)
+            print(f"  ✓ 타임라인 저장: {output_path}")
+            print(f"    (VS Code draw.io 확장 또는 diagrams.net에서 열기)\n")
+
+        except ValueError as e:
+            print(f"  ❌ {e}\n")
+        except Exception as e:
+            print(f"  ❌ 오류: {e}")
+            import traceback
+            traceback.print_exc()
 
     def _build_date_prompt(self, files: List[Path], range_label: str) -> str:
         """Build AI prompt for date-based summary.

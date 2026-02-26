@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 
 
 @dataclass
@@ -90,6 +90,15 @@ class TaskData:
     review_passed: Optional[bool] = None
     test_passed: Optional[bool] = None
 
+    # Thinking / Reasoning
+    thinking_summary: List[str] = field(default_factory=list)
+
+    # Tool execution results
+    tool_results_summary: List[str] = field(default_factory=list)
+
+    # Reference documents
+    referenced_documents: List[str] = field(default_factory=list)
+
     # Additional metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -111,6 +120,9 @@ class TaskData:
             "phases": [p.to_dict() for p in self.phases],
             "checkpoints": [c.to_dict() for c in self.checkpoints],
             "total_duration": self.format_duration(),
+            "thinking_summary": self.thinking_summary,
+            "tool_results_summary": self.tool_results_summary,
+            "referenced_documents": self.referenced_documents,
             "review_passed": self.review_passed,
             "test_passed": self.test_passed,
             "metadata": self.metadata,
@@ -132,3 +144,22 @@ class TaskData:
             return f"{minutes}m {seconds}s"
         else:
             return f"{seconds}s"
+
+
+@dataclass
+class TimelineEntry:
+    """일일 타임라인의 단일 항목."""
+
+    session_id: str          # Full UUID
+    session_short: str       # 앞 8자리
+    start_time: datetime
+    end_time: datetime       # 추론됨
+    label: str               # 작업 요약 (초기 요청에서 추출)
+    task_file: str           # 파일명 참조
+    status: str = "completed"
+    process_steps: List[Any] = field(default_factory=list)  # ProcessStep objects or strings
+    tools_used: str = ""     # 수행 작업 요약
+    files_modified: List[str] = field(default_factory=list)
+    thinking_summary: List[str] = field(default_factory=list)  # 사고 과정 요약
+    compact_count: int = 0   # 컨텍스트 압축 횟수
+    referenced_documents: List[str] = field(default_factory=list)  # 참조 문서

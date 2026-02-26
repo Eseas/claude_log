@@ -50,6 +50,12 @@ class ClaudeSessionLogParser(BaseLogParser):
         tool_uses = self._extract_tool_uses(content)
         assistant_responses = self._extract_assistant_responses(content)
 
+        # Parse new tags
+        thinking_blocks = self._extract_thinking_blocks(content)
+        tool_results = self._extract_tool_results(content)
+        documents = self._extract_documents(content)
+        compact_count = self._extract_compact_count(content)
+
         # Generate work summary
         work_summary = self._generate_work_summary(user_messages, tool_uses, assistant_responses)
 
@@ -57,8 +63,10 @@ class ClaudeSessionLogParser(BaseLogParser):
         files_modified = self._extract_files_from_tools(tool_uses, ['Edit', 'Write'])
         files_created = self._extract_files_from_tools(tool_uses, ['Write'])
 
-        # Extract key decisions from assistant responses
+        # Extract key decisions from assistant responses + thinking
         key_decisions = self._extract_key_points(assistant_responses)
+        key_decisions.extend(self._extract_thinking_decisions(thinking_blocks))
+        key_decisions = key_decisions[:15]
 
         return TaskData(
             task_id=session_id,
@@ -67,12 +75,18 @@ class ClaudeSessionLogParser(BaseLogParser):
             key_decisions=key_decisions,
             files_modified=files_modified,
             files_created=files_created,
+            thinking_summary=thinking_blocks,
+            tool_results_summary=tool_results,
+            referenced_documents=documents,
             status="completed",
             metadata={
                 "project_path": project_path,
                 "user_message_count": len(user_messages),
                 "tool_use_count": len(tool_uses),
                 "assistant_response_count": len(assistant_responses),
+                "thinking_count": len(thinking_blocks),
+                "compact_count": compact_count,
+                "has_thinking": len(thinking_blocks) > 0,
             }
         )
 
@@ -285,6 +299,70 @@ class ClaudeSessionLogParser(BaseLogParser):
             files.update(paths)
 
         return sorted(list(files))[:20]  # Limit to 20 files
+
+    def _extract_thinking_blocks(self, content: str) -> List[str]:
+        """Extract thinking process summaries from [THINKING] blocks.
+
+        Extracts the first sentence of each thinking block as a summary.
+        """
+        summaries = []
+        pattern = r'\[THINKING\]\s*(.+?)(?=\n\[(?:USER|TOOL|ASSISTANT|THINKING|TOOL_RESULT|DOCUMENT|SNAPSHOT|COMPACT)\]|\n=|$)'
+
+        for match in re.finditer(pattern, content, re.DOTALL):
+            thinking_text = match.group(1).strip()
+            if not thinking_text or len(thinking_text) < 10:
+                continue
+
+            # Get the first meaningful sentence as summary
+            for line in thinking_text.split('\n'):
+                line = line.strip()
+                if line and len(line) > 15 and not line.startswith('---'):
+                    # Truncate long lines
+                    summary = line[:200] if len(line) > 200 else line
+                    summaries.append(summary)
+                    break
+
+        return summaries[:20]  # Limit to 20 thinking summaries
+
+    def _extract_tool_results(self, content: str) -> List[str]:
+        """Extract tool execution results from [TOOL_RESULT] blocks."""
+        results = []
+        pattern = r'\[TOOL_RESULT\]\s*(.+?)(?=\n\[(?:USER|TOOL|ASSISTANT|THINKING|TOOL_RESULT|DOCUMENT|SNAPSHOT|COMPACT)\]|\n=|$)'
+
+        for match in re.finditer(pattern, content, re.DOTALL):
+            result_text = match.group(1).strip()
+            if result_text and len(result_text) > 5:
+                # Take first line only
+                first_line = result_text.split('\n')[0].strip()[:200]
+                results.append(first_line)
+
+        return results[:30]  # Limit
+
+    def _extract_documents(self, content: str) -> List[str]:
+        """Extract referenced document names from [DOCUMENT] blocks."""
+        documents = []
+        for match in re.finditer(r'\[DOCUMENT\]\s*(.+?)(?:\n|$)', content):
+            doc_name = match.group(1).strip()
+            if doc_name and doc_name != "untitled":
+                documents.append(doc_name)
+        return documents
+
+    def _extract_compact_count(self, content: str) -> int:
+        """Count context compression occurrences."""
+        return len(re.findall(r'\[COMPACT\]', content))
+
+    def _extract_thinking_decisions(self, thinking_blocks: List[str]) -> List[str]:
+        """Extract decision-related sentences from thinking summaries."""
+        decisions = []
+        decision_patterns = [
+            r'(?:I should|I need to|Let me|I\'ll|결정|선택|방법|접근|전략)',
+        ]
+        for block in thinking_blocks:
+            for pattern in decision_patterns:
+                if re.search(pattern, block, re.IGNORECASE):
+                    decisions.append(block)
+                    break
+        return decisions[:5]
 
     def _extract_key_points(self, assistant_responses: List[str]) -> List[str]:
         """Extract key points from assistant responses.

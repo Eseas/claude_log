@@ -64,6 +64,24 @@ No summary available
 {% endfor %}
 {% endif %}
 
+{% if task.thinking_summary %}
+### Thinking Process
+{% for thought in task.thinking_summary %}
+- {{ thought }}
+{% endfor %}
+{% endif %}
+
+{% if task.referenced_documents %}
+### Referenced Documents
+{% for doc in task.referenced_documents %}
+- `{{ doc }}`
+{% endfor %}
+{% endif %}
+
+{% if task.metadata.compact_count and task.metadata.compact_count > 0 %}
+**Context Compressions**: {{ task.metadata.compact_count }}회
+{% endif %}
+
 ---
 
 {% if task.phases %}
