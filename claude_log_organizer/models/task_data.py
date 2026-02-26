@@ -147,6 +147,26 @@ class TaskData:
 
 
 @dataclass
+class ProcessPhase:
+    """여러 ProcessStep을 그룹화한 작업 페이즈."""
+
+    phase_name: str        # "코드 분석 및 파일 탐색"
+    primary_type: str      # analysis/decision/implementation/verification/summary
+    step_count: int        # 원본 step 수
+    summary: str           # 이 페이즈에서 한 일 요약
+    key_details: List[str] = field(default_factory=list)  # 핵심 세부사항
+
+    def to_dict(self) -> dict:
+        return {
+            "phase_name": self.phase_name,
+            "primary_type": self.primary_type,
+            "step_count": self.step_count,
+            "summary": self.summary,
+            "key_details": self.key_details,
+        }
+
+
+@dataclass
 class TimelineEntry:
     """일일 타임라인의 단일 항목."""
 
@@ -158,6 +178,7 @@ class TimelineEntry:
     task_file: str           # 파일명 참조
     status: str = "completed"
     process_steps: List[Any] = field(default_factory=list)  # ProcessStep objects or strings
+    process_phases: List[Any] = field(default_factory=list)  # ProcessPhase objects (AI 요약)
     tools_used: str = ""     # 수행 작업 요약
     files_modified: List[str] = field(default_factory=list)
     thinking_summary: List[str] = field(default_factory=list)  # 사고 과정 요약

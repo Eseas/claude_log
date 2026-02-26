@@ -5,7 +5,7 @@ Claude Code 대화 로그를 자동으로 수집하고, 구조화된 마크다�
 ## 동작 방식
 
 ```
-Claude Code 대화
+Claude Code 대화 종료
        │
        ▼
 ┌─────────────────────┐     ┌────────────────────┐
@@ -36,7 +36,7 @@ Claude Code 대화
 ### 파이프라인 요약
 
 1. **JSONL 수집** — Claude Code가 대화마다 자동 생성하는 JSONL 트랜스크립트
-2. **Hook 변환** — `save-conversation-log.sh`(Stop Hook)가 JSONL을 태그 기반 `.log` 파일로 변환
+2. **Hook 변환** — `save-conversation-log.sh`(Stop Hook)가 JSONL에서 새 내용만 증분 추출하여 `.log` 파일로 변환
 3. **파싱** — `session_parser.py`가 `.log`를 파싱하여 `TaskData` 모델로 변환
 4. **출력 생성** — 마크다운 요약 (`task-*.md`) 및 타임라인 다이어그램 (`.drawio` + companion `.md`)
 
@@ -105,60 +105,69 @@ cd claude_log
 pip install -e .
 ```
 
+> `pip install -e .` 실행 후 `command not found` 오류가 발생하면, 설치 시 출력된 경로 (예: `~/Library/Python/3.9/bin`)를 `~/.zshrc`에 추가하세요:
+> ```bash
+> export PATH="$HOME/Library/Python/3.9/bin:$PATH"
+> ```
+
 ### 요구사항
 
 - Python 3.8+
-- jinja2 >= 3.1.0
 - pyyaml >= 6.0
 - watchdog >= 3.0.0
+- jinja2 >= 3.1.0
 - python-dateutil >= 2.8.0
+- inquirer >= 3.1.0
+- anthropic >= 0.18.0 (AI 요약 기능 사용 시)
 
 ## 사용법
 
-### 설정 초기화
+### 기본 실행 (Interactive 모드)
+
+명령어 없이 실행하면 대화형 메뉴가 시작됩니다:
 
 ```bash
-claude-log-organizer init
+claude-log-organizer
 ```
 
-### 단일 파일 처리
+```
+============================================================
+Claude Log Organizer - Interactive Mode
+============================================================
 
-```bash
-claude-log-organizer process .claude/logs/2026-02-19_170012_abc123.log
+? 작업을 선택하세요
+  1. Watch - 디렉토리 모니터링 시작
+  2. Request AI - AI 요약 요청
+  3. Exit - 종료
 ```
 
-### 디렉토리 일괄 처리
+Interactive 모드에서 Watch, AI 요약(세션별/날짜별), 효율성 분석, 타임라인 다이어그램 생성을 메뉴로 선택할 수 있습니다.
+
+### CLI 명령어
 
 ```bash
-claude-log-organizer batch .claude/logs/
-claude-log-organizer batch .claude/logs/ --force  # 전체 재처리
-```
-
-### 디렉토리 감시 (실시간)
-
-```bash
-claude-log-organizer watch
-```
-
-### 타임라인 생성
-
-```bash
-claude-log-organizer timeline 2026-02-19
-# -> summaries/daily-2026-02-19_timeline.drawio
-# -> summaries/daily-2026-02-19_timeline.md
-```
-
-### 처리 이력 초기화
-
-```bash
-claude-log-organizer clear
+claude-log-organizer init                          # 설정 파일 생성
+claude-log-organizer watch                         # 디렉토리 감시 (실시간)
+claude-log-organizer process <file>                # 단일 파일 처리
+claude-log-organizer batch <dir>                   # 디렉토리 일괄 처리
+claude-log-organizer batch <dir> --force           # 전체 재처리
+claude-log-organizer timeline 2026-02-19           # 타임라인 다이어그램 생성
+claude-log-organizer clear                         # 처리 이력 초기화
 ```
 
 ## Hook 설정
 
-### Stop Hook (로그 저장)
+### Stop Hook (로그 저장 — 증분 방식)
 
-`.claude/hooks/save-conversation-log.sh`가 대화 종료 시 자동으로 JSONL을 `.log`로 변환합니다.
+`.claude/hooks/save-conversation-log.sh`가 대화 종료 시 JSONL에서 **새로운 내용만** 추출하여 `.log`로 변환합니다.
+
+```
+Stop 1회차 → 2026-02-26_150000_abc.log (JSONL 라인 1~50)
+Stop 2회차 → 2026-02-26_153000_abc.log (JSONL 라인 51~80, 새 내용만)
+Stop 3회차 → 새 라인 없으면 파일 미생성
+```
+
+세션별 처리 상태는 `.claude/logs/.state/SESSION_ID.lines`에 저장됩니다.
 
 글로벌 설정 (`~/.claude/settings.json`):
 
@@ -188,7 +197,8 @@ claude-log-organizer clear
 ```
 claude_log/
 ├── claude_log_organizer/
-│   ├── cli.py                      # CLI 엔트리포인트
+│   ├── cli.py                      # CLI 엔트리포인트 (기본: Interactive 모드)
+│   ├── interactive.py              # Interactive CLI (메뉴 기반)
 │   ├── config.py                   # 설정 관리
 │   ├── main.py                     # 앱 오케스트레이터
 │   ├── generators/
@@ -207,6 +217,7 @@ claude_log/
 │   └── watcher/
 │       ├── file_watcher.py         # 파일 감시
 │       └── event_dispatcher.py     # 이벤트 디스패처
+├── prompt_optimizer/               # 프롬프트 효율성 분석
 ├── templates/
 │   └── default.md.jinja2           # task 마크다운 템플릿
 ├── .claude/
@@ -216,8 +227,8 @@ claude_log/
 │   │   └── stop                      # Project stop hook
 │   └── settings.local.json           # 프로젝트 Hook 설정
 ├── tasks/                          # 생성된 task 마크다운
-├── summaries/                      # 생성된 타임라인 (.drawio + .md)
-├── config.yaml
+├── summaries/                      # 생성된 타임라인/요약 (.drawio + .md)
+├── config.yaml                     # 실행 설정
 ├── setup.py
 └── requirements.txt
 ```
@@ -226,27 +237,43 @@ claude_log/
 
 ```yaml
 watch:
-  directory: ./logs
-  patterns: ["conversation-task-*.log"]
+  # 감시할 디렉토리 (절대 경로 또는 ~ 사용)
+  directories:
+    - ~/Desktop/workspace/project-a/.claude/logs
+    - ~/Desktop/workspace/project-b/.claude/logs
+  patterns:
+    - '*.log'
   poll_interval: 1.0
+  recursive: false
+  debounce_delay: 3.0
 
 output:
   directory: ./tasks
-  filename_pattern: "task-{task_id}.md"
   summaries_directory: ./summaries
+  filename_pattern: task-{task_id}.md
+  overwrite: false
 
 parsing:
   extract_code_snippets: true
+  max_snippet_lines: 50
   extract_phases: true
   extract_decisions: true
+  extract_file_changes: true
 
 templates:
   directory: ./templates
-  default_template: "default.md.jinja2"
+  default_template: default.md.jinja2
 
 storage:
-  processed_log: ".processed.json"
+  processed_log: .processed.json
   enable_cache: true
+
+logging:
+  level: INFO
+  file: organizer.log
+
+summarization:
+  weekly_start: monday    # monday 또는 sunday
 ```
 
 ## 커스터마이징

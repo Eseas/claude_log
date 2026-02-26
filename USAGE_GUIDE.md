@@ -103,6 +103,8 @@ Claude Log Organizer - Interactive Mode
 
 #### Step 3: 분석 타입 선택
 
+Session 기반, Date 기반 모두 동일한 분석 타입을 선택할 수 있습니다:
+
 ```
 ? 분석 타입을 선택하세요
   1. 일반 요약 - 세션 작업 내용 요약
@@ -114,9 +116,9 @@ Claude Log Organizer - Interactive Mode
 |-----------|------|------|
 | 일반 요약 | 세션/기간 작업 종합 요약 | `summaries/*_summary.md` |
 | 효율성 분석 | 프롬프트 효율성 평가 + 개선 제안 | `summaries/*_efficiency.md` |
-| 타임라인 다이어그램 | Gantt 차트 + 작업 흐름도 | `summaries/*_timeline.drawio` + `.md` |
+| 타임라인 다이어그램 | Gantt 차트 + 작업 흐름도 (AI 불필요) | `summaries/*_timeline.drawio` + `.md` |
 
-#### Step 4: AI 방식 선택 (일반 요약/효율성 분석만 해당)
+#### Step 4: AI 방식 선택 (일반 요약/효율성 분석만 해당, 타임라인은 건너뜀)
 
 ```
 ? AI 요약 방식을 선택하세요
@@ -182,7 +184,15 @@ claude-log-organizer timeline 2026-02-19
 
 ## Hook 설정
 
-Claude Code의 Stop Hook으로 대화 종료 시 자동으로 JSONL 트랜스크립트를 `.log` 파일로 변환합니다.
+Claude Code의 Stop Hook으로 대화 종료 시 JSONL 트랜스크립트에서 **새로운 내용만** 추출하여 `.log` 파일로 변환합니다 (증분 방식).
+
+```
+Stop 1회차 → 2026-02-26_150000_abc.log (JSONL 라인 1~50)
+Stop 2회차 → 2026-02-26_153000_abc.log (JSONL 라인 51~80, 새 내용만)
+Stop 3회차 → 새 라인 없으면 파일 미생성
+```
+
+세션별 처리 상태: `.claude/logs/.state/SESSION_ID.lines`
 
 ### 1. 글로벌 Hook 등록
 
@@ -245,7 +255,7 @@ Hook 스크립트가 JSONL에서 추출하는 태그:
 
 ```
 Claude Code 대화 종료
-  → Stop Hook이 JSONL → .log 변환
+  → Stop Hook이 JSONL에서 새 라인만 추출 → .log 생성
   → watch 모드가 .log 감지
   → parser가 .log 파싱 → TaskData 생성
   → Jinja2 템플릿으로 task-*.md 생성

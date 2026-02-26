@@ -310,6 +310,15 @@ class InteractiveCLI:
         if not analysis_type:
             return
 
+        # Timeline diagram doesn't need AI
+        if analysis_type == "timeline":
+            all_files = []
+            for sid in selected_sessions:
+                all_files.extend(sessions[sid])
+            range_label = f"session-{selected_sessions[0][:8]}" if len(selected_sessions) == 1 else f"sessions-{len(selected_sessions)}"
+            self._generate_timeline_diagram(all_files, range_label)
+            return
+
         # Ask for AI method
         ai_method = self._select_ai_method()
         if not ai_method:

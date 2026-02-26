@@ -1,6 +1,11 @@
 """Generates draw.io (.drawio) timeline diagrams and companion markdown from task files."""
 
+import hashlib
+import json
+import logging
 import re
+import shutil
+import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -8,7 +13,9 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple
 from collections import OrderedDict
 
-from claude_log_organizer.models.task_data import TimelineEntry
+from claude_log_organizer.models.task_data import TimelineEntry, ProcessPhase
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -52,15 +59,17 @@ BAR_Y_OFFSET = 22
 PX_PER_MINUTE = 4
 MIN_BAR_WIDTH = 50
 
-# Process flow layout constants
-FLOW_BOX_WIDTH = 220
-FLOW_BOX_HEIGHT = 50
-FLOW_H_GAP = 30
-FLOW_V_GAP = 30
-FLOW_ARROW_STYLE = "edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#999999;"
-FLOW_SESSION_TITLE_HEIGHT = 30
-FLOW_LEFT_MARGIN = 20
-FLOW_MAX_COLS = 4
+# Per-entry page layout constants
+ENTRY_PAGE_WIDTH = 520
+ENTRY_PAGE_LEFT_MARGIN = 30
+ENTRY_BOX_WIDTH = 450
+ENTRY_BOX_MIN_HEIGHT = 60
+ENTRY_LINE_HEIGHT = 16
+ENTRY_V_GAP = 10
+ENTRY_ARROW_GAP = 20
+ENTRY_TITLE_HEIGHT = 50
+ENTRY_META_HEIGHT = 30
+ENTRY_TAB_MAX_CHARS = 40
 
 
 class TimelineDiagramGenerator:
@@ -95,6 +104,11 @@ class TimelineDiagramGenerator:
         all_entries = list(entries)
 
         merged_entries = self._merge_same_requests(entries)
+
+        # Summarize process steps into phases for entries with many steps
+        for entry in merged_entries:
+            if len(entry.process_steps) > 8:
+                entry.process_phases = self._summarize_process_steps(entry.process_steps)
 
         title = date_label.replace("daily-", "").replace("weekly-", "").replace("_to_", " ~ ")
         title_display = f"{title} Daily Timeline"
@@ -182,6 +196,9 @@ class TimelineDiagramGenerator:
             return file_path.stem
 
         label = match.group(1).strip()
+        # Strip IDE metadata tags
+        label = re.sub(r"<ide_opened_file>.*?</ide_opened_file>\s*", "", label).strip()
+        label = re.sub(r"<ide_opened_file>.*$", "", label).strip()
         label = re.sub(r"@[\w/.~-]+", "", label).strip()
         label = re.sub(r"^Implement the following plan:\s*", "", label, flags=re.IGNORECASE).strip()
 
@@ -410,6 +427,272 @@ class TimelineDiagramGenerator:
 
         return merged
 
+    # ===== Process step summarization =====
+
+    def _summarize_process_steps(self, steps: List['ProcessStep']) -> List[ProcessPhase]:
+        """Two-stage summarization: algorithmic grouping + optional AI refinement."""
+        # Stage 1: algorithmic grouping (merge consecutive same-type)
+        phases = self._group_consecutive_steps(steps)
+
+        # If already compact enough, return
+        if len(phases) <= 8:
+            return phases
+
+        # Stage 2: AI summarization
+        steps_hash = self._get_steps_hash(steps)
+        cached = self._load_cached_phases(steps_hash)
+        if cached is not None:
+            logger.info(f"Using cached phase summary ({len(cached)} phases)")
+            return cached
+
+        ai_phases = self._ai_summarize_phases(steps)
+        if ai_phases is not None:
+            logger.info(f"AI summarized {len(steps)} steps into {len(ai_phases)} phases")
+            self._save_cached_phases(steps_hash, ai_phases)
+            return ai_phases
+
+        # Stage 3: Algorithmic condensation (fallback when AI unavailable)
+        condensed = self._condense_phases(phases)
+        logger.info(f"Algorithmically condensed {len(phases)} phases into {len(condensed)} phases")
+        return condensed
+
+    def _group_consecutive_steps(self, steps: List['ProcessStep']) -> List[ProcessPhase]:
+        """Group consecutive same-type steps into phases."""
+        if not steps:
+            return []
+
+        phases = []
+        current_type = None
+        current_steps: List['ProcessStep'] = []
+
+        for step in steps:
+            step_type = step.type if isinstance(step, ProcessStep) else "analysis"
+            if step_type != current_type and current_steps:
+                phases.append(self._steps_to_phase(current_steps, current_type))
+                current_steps = []
+            current_type = step_type
+            current_steps.append(step)
+
+        if current_steps:
+            phases.append(self._steps_to_phase(current_steps, current_type))
+
+        return phases
+
+    def _steps_to_phase(self, steps: List['ProcessStep'], step_type: str) -> ProcessPhase:
+        """Convert a group of same-type steps into a single ProcessPhase."""
+        first = steps[0]
+        summary = first.summary if isinstance(first, ProcessStep) else str(first)
+
+        # Collect key details from steps that have them
+        details = []
+        for s in steps:
+            if isinstance(s, ProcessStep) and s.details:
+                for d in s.details[:2]:
+                    if d not in details:
+                        details.append(d)
+                        if len(details) >= 5:
+                            break
+            if len(details) >= 5:
+                break
+
+        icon = STEP_TYPE_STYLES.get(step_type, STEP_TYPE_STYLES["analysis"])[2]
+        type_label = step_type.capitalize()
+
+        return ProcessPhase(
+            phase_name=f"{summary}" if len(steps) == 1 else f"{type_label}: {summary}",
+            primary_type=step_type,
+            step_count=len(steps),
+            summary=summary,
+            key_details=details,
+        )
+
+    def _condense_phases(self, phases: List[ProcessPhase]) -> List[ProcessPhase]:
+        """Condense many algorithmic phases into ~6 by equal-sized chunking."""
+        if len(phases) <= 8:
+            return phases
+
+        target_count = 6
+        chunk_size = max(1, len(phases) // target_count)
+        condensed = []
+
+        for i in range(0, len(phases), chunk_size):
+            chunk = phases[i:i + chunk_size]
+
+            # Dominant type by step_count
+            type_counts: Dict[str, int] = {}
+            for p in chunk:
+                type_counts[p.primary_type] = type_counts.get(p.primary_type, 0) + p.step_count
+            dominant_type = max(type_counts, key=type_counts.get)
+
+            total_steps = sum(p.step_count for p in chunk)
+
+            # Aggregate unique key_details (max 5)
+            aggregated_details: List[str] = []
+            for p in chunk:
+                for d in p.key_details:
+                    if d not in aggregated_details:
+                        aggregated_details.append(d)
+                    if len(aggregated_details) >= 5:
+                        break
+                if len(aggregated_details) >= 5:
+                    break
+
+            condensed.append(ProcessPhase(
+                phase_name=chunk[0].phase_name,
+                primary_type=dominant_type,
+                step_count=total_steps,
+                summary=chunk[0].summary,
+                key_details=aggregated_details,
+            ))
+
+        return condensed
+
+    def _ai_summarize_phases(self, steps: List['ProcessStep']) -> Optional[List[ProcessPhase]]:
+        """Use Claude CLI to summarize steps into 5-8 meaningful phases."""
+        if shutil.which("claude") is None:
+            logger.info("Claude CLI not available, using algorithmic grouping")
+            return None
+
+        prompt = self._build_summarization_prompt(steps)
+
+        try:
+            result = subprocess.run(
+                ["claude", "--print"],
+                input=prompt,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode != 0:
+                logger.warning(f"Claude CLI failed: {result.stderr[:200]}")
+                return None
+
+            return self._parse_ai_phases(result.stdout.strip())
+        except subprocess.TimeoutExpired:
+            logger.warning("Claude CLI timed out for phase summarization")
+            return None
+        except Exception as e:
+            logger.warning(f"Claude CLI error: {e}")
+            return None
+
+    def _build_summarization_prompt(self, steps: List['ProcessStep']) -> str:
+        """Build prompt for AI phase summarization."""
+        # Limit to first 100 steps to avoid overly long prompts
+        display_steps = steps[:100]
+        step_lines = []
+        for i, step in enumerate(display_steps, 1):
+            if isinstance(step, ProcessStep):
+                step_lines.append(f"{i}. [{step.type}] {step.summary}")
+            else:
+                step_lines.append(f"{i}. [analysis] {step}")
+
+        if len(steps) > 100:
+            step_lines.append(f"... (총 {len(steps)}개 중 처음 100개만 표시)")
+
+        steps_text = "\n".join(step_lines)
+
+        return f"""다음은 하나의 Claude 작업 세션에서 추출된 {len(steps)}개의 작업 단계입니다.
+이 단계들을 5~8개의 의미 있는 작업 페이즈(phase)로 그룹화해주세요.
+
+각 페이즈는 반드시 다음 형식으로 출력해주세요:
+PHASE: [페이즈 이름]
+TYPE: [analysis|decision|implementation|verification|summary]
+STEPS: [시작번호]-[끝번호]
+SUMMARY: [이 페이즈에서 한 일을 한 문장으로 요약]
+DETAILS:
+- [핵심 세부사항 1]
+- [핵심 세부사항 2]
+- [핵심 세부사항 3]
+---
+
+규칙:
+- 반드시 5~8개의 페이즈로 그룹화
+- 각 페이즈 사이에 "---"를 넣어주세요
+- TYPE은 반드시 analysis, decision, implementation, verification, summary 중 하나
+- STEPS는 시작번호와 끝번호를 하이픈으로 연결
+- DETAILS는 최대 3개
+
+작업 단계:
+{steps_text}"""
+
+    def _parse_ai_phases(self, response: str) -> Optional[List[ProcessPhase]]:
+        """Parse structured AI response into ProcessPhase objects."""
+        phases = []
+        blocks = response.split("---")
+
+        valid_types = {"analysis", "decision", "implementation", "verification", "summary"}
+
+        for block in blocks:
+            block = block.strip()
+            if not block:
+                continue
+
+            phase_match = re.search(r"PHASE:\s*(.+)", block)
+            type_match = re.search(r"TYPE:\s*(\w+)", block)
+            steps_match = re.search(r"STEPS:\s*(\d+)\s*-\s*(\d+)", block)
+            summary_match = re.search(r"SUMMARY:\s*(.+)", block)
+
+            if not all([phase_match, type_match, steps_match, summary_match]):
+                continue
+
+            phase_type = type_match.group(1).strip().lower()
+            if phase_type not in valid_types:
+                phase_type = "analysis"
+
+            start_idx = int(steps_match.group(1))
+            end_idx = int(steps_match.group(2))
+            step_count = max(end_idx - start_idx + 1, 1)
+
+            details = re.findall(r"^- (.+)$", block, re.MULTILINE)
+
+            phases.append(ProcessPhase(
+                phase_name=phase_match.group(1).strip(),
+                primary_type=phase_type,
+                step_count=step_count,
+                summary=summary_match.group(1).strip(),
+                key_details=details[:5],
+            ))
+
+        if len(phases) < 3 or len(phases) > 12:
+            logger.warning(f"AI returned {len(phases)} phases (expected 3-12), falling back")
+            return None
+
+        return phases
+
+    # ===== Phase cache =====
+
+    def _get_steps_hash(self, steps: List['ProcessStep']) -> str:
+        content = "|".join(
+            f"{s.type}:{s.summary[:50]}" if isinstance(s, ProcessStep) else str(s)[:50]
+            for s in steps
+        )
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    def _load_cached_phases(self, steps_hash: str) -> Optional[List[ProcessPhase]]:
+        cache_path = Path("summaries/.phase_cache.json")
+        if not cache_path.exists():
+            return None
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            if steps_hash in cache:
+                return [ProcessPhase(**p) for p in cache[steps_hash]]
+        except Exception:
+            pass
+        return None
+
+    def _save_cached_phases(self, steps_hash: str, phases: List[ProcessPhase]):
+        cache_path = Path("summaries/.phase_cache.json")
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+        except Exception:
+            cache = {}
+        cache[steps_hash] = [p.to_dict() for p in phases]
+        try:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as e:
+            logger.warning(f"Failed to save phase cache: {e}")
+
     # ===== draw.io XML generation =====
 
     def _build_drawio_xml(
@@ -418,14 +701,22 @@ class TimelineDiagramGenerator:
         all_entries: List[TimelineEntry],
         title: str,
     ) -> str:
-        """Build .drawio with Page 1 (Gantt) and Page 2 (Process Flow)."""
+        """Build .drawio with Page 1 (Gantt) and per-entry pages (Process Flow)."""
         mxfile = ET.Element("mxfile", host="Claude Log Organizer")
 
         # Page 1: Gantt Timeline
         self._build_gantt_page(mxfile, merged_entries, title)
 
-        # Page 2: Process Flow
-        self._build_process_page(mxfile, merged_entries, title)
+        # Pages 2..N: One page per merged entry
+        sessions_seen: List[str] = []
+        for entry in merged_entries:
+            if entry.session_short not in sessions_seen:
+                sessions_seen.append(entry.session_short)
+
+        for entry_idx, entry in enumerate(merged_entries):
+            session_idx = sessions_seen.index(entry.session_short)
+            color_fill, color_stroke = COLORS[session_idx % len(COLORS)]
+            self._build_entry_page(mxfile, entry, entry_idx, color_fill, color_stroke)
 
         ET.indent(mxfile, space="  ")
         return ET.tostring(mxfile, encoding="unicode", xml_declaration=True)
@@ -512,12 +803,17 @@ class TimelineDiagramGenerator:
                 bar_y = row_y + BAR_Y_OFFSET
                 time_range = f"{entry.start_time.strftime('%H:%M')} - {entry.end_time.strftime('%H:%M')}"
 
-                # Shorten label for bar display (keep full in tooltip)
-                bar_label = entry.label if len(entry.label) <= 50 else entry.label[:50]
+                bar_label = entry.label
                 tooltip_lines = [entry.label, time_range, entry.task_file]
-                if entry.process_steps:
+                if entry.process_phases:
                     tooltip_lines.append("")
-                    for i, step in enumerate(entry.process_steps[:5], 1):
+                    tooltip_lines.append("[Work Phases]")
+                    for phase in entry.process_phases:
+                        icon = STEP_TYPE_STYLES.get(phase.primary_type, STEP_TYPE_STYLES["analysis"])[2]
+                        tooltip_lines.append(f"  {icon} {phase.phase_name} ({phase.step_count} steps)")
+                elif entry.process_steps:
+                    tooltip_lines.append("")
+                    for i, step in enumerate(entry.process_steps, 1):
                         if isinstance(step, ProcessStep):
                             icon = STEP_TYPE_STYLES.get(step.type, STEP_TYPE_STYLES["analysis"])[2]
                             tooltip_lines.append(f"{i}. {icon} [{step.type}] {step.summary}")
@@ -526,8 +822,8 @@ class TimelineDiagramGenerator:
                 if entry.thinking_summary:
                     tooltip_lines.append("")
                     tooltip_lines.append("[Thinking]")
-                    for t in entry.thinking_summary[:3]:
-                        tooltip_lines.append(f"  - {t[:100]}")
+                    for t in entry.thinking_summary:
+                        tooltip_lines.append(f"  - {t}")
                 if entry.referenced_documents:
                     tooltip_lines.append("")
                     tooltip_lines.append("[Documents]")
@@ -548,197 +844,206 @@ class TimelineDiagramGenerator:
                     "text;html=1;align=left;verticalAlign=top;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=8;fontColor=#999999;",
                     bar_x, bar_y + BAR_HEIGHT, bar_width, 14)
 
-    def _build_process_page(self, mxfile: ET.Element, entries: List[TimelineEntry], title: str):
-        """Build the process flow page showing work steps for each entry."""
-        sessions: Dict[str, List[TimelineEntry]] = OrderedDict()
-        for entry in entries:
-            if entry.session_short not in sessions:
-                sessions[entry.session_short] = []
-            sessions[entry.session_short].append(entry)
+    def _estimate_box_height(self, text_lines: int) -> int:
+        """Estimate box height based on number of text lines."""
+        return max(ENTRY_BOX_MIN_HEIGHT, 30 + text_lines * ENTRY_LINE_HEIGHT)
 
-        # Calculate page dimensions (accounting for variable box heights)
-        max_steps = 0
-        total_estimated_height = 0
-        legend_height = 80  # space for step type legend
-        for session_entries in sessions.values():
-            for entry in session_entries:
-                n_steps = len(entry.process_steps)
-                if n_steps > 0:
-                    grid_rows = (n_steps + FLOW_MAX_COLS - 1) // FLOW_MAX_COLS
-                    # Estimate extra height from detail lines
-                    max_details = max(
-                        (min(len(s.details), 3) * 14 if isinstance(s, ProcessStep) and s.details else 0)
-                        for s in entry.process_steps
-                    ) if entry.process_steps else 0
-                    total_estimated_height += grid_rows * (FLOW_BOX_HEIGHT + max_details + FLOW_V_GAP)
-                    max_steps = max(max_steps, min(n_steps, FLOW_MAX_COLS))
-                else:
-                    total_estimated_height += FLOW_BOX_HEIGHT + FLOW_V_GAP
-                # Entry header + documents + thinking
-                total_estimated_height += FLOW_BOX_HEIGHT + 20
-                total_estimated_height += len(entry.referenced_documents) * 35
-                total_estimated_height += min(len(entry.thinking_summary), 3) * 22
-            total_estimated_height += FLOW_SESSION_TITLE_HEIGHT + 30  # session header
+    def _build_entry_page(
+        self,
+        mxfile: ET.Element,
+        entry: TimelineEntry,
+        entry_idx: int,
+        color_fill: str,
+        color_stroke: str,
+    ) -> None:
+        """Build a single draw.io page for one entry with vertical phase/step flow."""
+        # Page tab name: max 40 chars, word-boundary truncation (no ellipsis)
+        tab_name = entry.label
+        if len(tab_name) > ENTRY_TAB_MAX_CHARS:
+            cut = tab_name[:ENTRY_TAB_MAX_CHARS].rfind(' ')
+            tab_name = tab_name[:cut] if cut > 20 else tab_name[:ENTRY_TAB_MAX_CHARS]
 
-        page_width = FLOW_LEFT_MARGIN + max(max_steps, 1) * (FLOW_BOX_WIDTH + FLOW_H_GAP) + 100
-        page_height = 80 + total_estimated_height + legend_height + 60
+        diagram_id = f"entry_{entry_idx}"
+        diagram = ET.SubElement(mxfile, "diagram", name=tab_name, id=diagram_id)
 
-        diagram = ET.SubElement(mxfile, "diagram", name="Process Flow", id="process")
         graph_model = ET.SubElement(
             diagram, "mxGraphModel",
-            dx=str(page_width), dy=str(page_height),
+            dx=str(ENTRY_PAGE_WIDTH), dy="2000",
             grid="1", gridSize="10", guides="1", tooltips="1",
             connect="1", arrows="1", fold="1", page="1", pageScale="1",
-            pageWidth=str(page_width), pageHeight=str(page_height),
+            pageWidth=str(ENTRY_PAGE_WIDTH), pageHeight="2000",
         )
         root = ET.SubElement(graph_model, "root")
         ET.SubElement(root, "mxCell", id="0")
         ET.SubElement(root, "mxCell", id="1", parent="0")
-        cell_id = 2
 
-        # Title
-        cell_id = self._add_cell(root, cell_id,
-            title.replace("Daily Timeline", "Work Process"),
-            "text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=18;fontStyle=1;",
-            FLOW_LEFT_MARGIN, 20, 500, 40)
+        # Cell ID offset to avoid collisions across pages
+        cell_id = 2 + (entry_idx + 1) * 10000
 
-        # Legend - step type color reference
-        legend_y = 65
-        legend_x = FLOW_LEFT_MARGIN
+        y_cursor = 20
+
+        # --- Title ---
+        cell_id = self._add_cell(root, cell_id, f"<b>{entry.label}</b>",
+            "text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;"
+            "strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;whiteSpace=wrap;",
+            ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, ENTRY_TITLE_HEIGHT)
+        y_cursor += ENTRY_TITLE_HEIGHT
+
+        # --- Meta: time + session ---
+        time_str = f"{entry.start_time.strftime('%H:%M')} - {entry.end_time.strftime('%H:%M')}"
+        meta_text = f"Session {entry.session_short} | {time_str}"
+        if entry.compact_count > 0:
+            meta_text += f" | compact x{entry.compact_count}"
+        cell_id = self._add_cell(root, cell_id, meta_text,
+            f"text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;"
+            f"strokeColor=none;fillColor=none;fontSize=10;fontColor={color_stroke};",
+            ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, ENTRY_META_HEIGHT)
+        y_cursor += ENTRY_META_HEIGHT + 10
+
+        # --- Referenced documents ---
+        if entry.referenced_documents:
+            for doc in entry.referenced_documents:
+                cell_id = self._add_cell(root, cell_id,
+                    f"📄 {doc}",
+                    "rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#cccccc;"
+                    "fontSize=9;fontColor=#666666;fontStyle=2;align=left;verticalAlign=middle;spacingLeft=6;",
+                    ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, 26)
+                y_cursor += 30
+            y_cursor += 5
+
+        # --- Legend ---
+        legend_x = ENTRY_PAGE_LEFT_MARGIN
         for step_type, (fill, stroke, icon) in STEP_TYPE_STYLES.items():
-            legend_style = f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};fontSize=8;fontColor=#333333;align=center;verticalAlign=middle;"
-            if step_type == "decision":
-                legend_style = f"shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;size=5;fillColor={fill};strokeColor={stroke};fontSize=8;fontColor=#333333;align=center;verticalAlign=middle;"
-            elif step_type == "verification":
-                legend_style += "dashed=1;dashPattern=3 2;"
+            legend_style = (
+                f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
+                f"fontSize=8;fontColor=#333333;align=center;verticalAlign=middle;"
+            )
             cell_id = self._add_cell(root, cell_id,
                 f"{icon} {step_type.capitalize()}",
                 legend_style,
-                legend_x, legend_y, 100, 24)
-            legend_x += 110
+                legend_x, y_cursor, 88, 20)
+            legend_x += 95
+        y_cursor += 30
 
-        y_cursor = legend_y + 40
+        # --- Phase/Step vertical flow ---
+        items = entry.process_phases if entry.process_phases else entry.process_steps
+        prev_cell_id = None
 
-        for session_idx, (session_short, session_entries) in enumerate(sessions.items()):
-            color_fill, color_stroke = COLORS[session_idx % len(COLORS)]
+        if items:
+            for idx, item in enumerate(items):
+                if isinstance(item, ProcessPhase):
+                    fill, stroke, icon = STEP_TYPE_STYLES.get(item.primary_type, STEP_TYPE_STYLES["analysis"])
 
-            # Session header
-            cell_id = self._add_cell(root, cell_id,
-                f"Session {session_short}",
-                f"text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=14;fontStyle=1;fontColor={color_stroke};",
-                FLOW_LEFT_MARGIN, y_cursor, 300, FLOW_SESSION_TITLE_HEIGHT)
-            y_cursor += FLOW_SESSION_TITLE_HEIGHT + 10
+                    label_parts = [f"<b>{icon} {idx + 1}. {item.phase_name}</b>"]
+                    label_parts.append(
+                        f"<br/><font style='font-size:9px' color='#666666'>"
+                        f"({item.step_count} steps, {item.primary_type})</font>"
+                    )
+                    label_parts.append(f"<br/>{item.summary}")
+                    for detail in item.key_details:
+                        label_parts.append(
+                            f"<br/><font style='font-size:8px' color='#555555'>- {detail}</font>"
+                        )
 
-            for entry in session_entries:
-                time_str = f"{entry.start_time.strftime('%H:%M')} - {entry.end_time.strftime('%H:%M')}"
+                    label = "".join(label_parts)
+                    text_lines = 3 + len(item.key_details)
+                    box_height = self._estimate_box_height(text_lines)
+                    item_type = item.primary_type
 
-                # Compact indicator
-                compact_label = f" [compact x{entry.compact_count}]" if entry.compact_count > 0 else ""
+                elif isinstance(item, ProcessStep):
+                    fill, stroke, icon = STEP_TYPE_STYLES.get(item.type, STEP_TYPE_STYLES["analysis"])
 
-                # Entry label box (dashed if compact)
-                entry_style = f"rounded=1;whiteSpace=wrap;html=1;fillColor={color_fill};strokeColor={color_stroke};fontSize=11;fontColor=#333333;align=left;verticalAlign=middle;spacingLeft=8;spacingRight=8;"
-                if entry.compact_count > 0:
-                    entry_style += "dashed=1;dashPattern=5 3;"
+                    label_parts = [f"<b>{icon} {idx + 1}. {item.summary}</b>"]
+                    for detail in item.details:
+                        label_parts.append(
+                            f"<br/><font style='font-size:8px' color='#555555'>- {detail}</font>"
+                        )
 
+                    label = "".join(label_parts)
+                    text_lines = 1 + len(item.details)
+                    box_height = self._estimate_box_height(text_lines)
+                    item_type = item.type
+
+                else:
+                    label = f"<b>{idx + 1}.</b> {item}"
+                    box_height = ENTRY_BOX_MIN_HEIGHT
+                    item_type = "analysis"
+                    fill, stroke, icon = STEP_TYPE_STYLES["analysis"]
+
+                # Style by type
+                if item_type == "decision":
+                    style = (
+                        f"shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;"
+                        f"fixedSize=1;size=10;fillColor={fill};strokeColor={stroke};strokeWidth=2;"
+                        f"fontSize=9;fontColor=#333333;align=left;verticalAlign=top;"
+                        f"spacingLeft=12;spacingRight=12;spacingTop=6;"
+                    )
+                elif item_type == "verification":
+                    style = (
+                        f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
+                        f"strokeWidth=2;fontSize=9;fontColor=#333333;align=left;verticalAlign=top;"
+                        f"spacingLeft=6;spacingRight=6;spacingTop=6;dashed=1;dashPattern=3 2;"
+                    )
+                else:
+                    style = (
+                        f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
+                        f"strokeWidth=1;fontSize=9;fontColor=#333333;align=left;verticalAlign=top;"
+                        f"spacingLeft=6;spacingRight=6;spacingTop=6;"
+                    )
+
+                current_cell_id = cell_id
+                cell_id = self._add_cell(root, cell_id, label, style,
+                    ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, box_height)
+
+                if prev_cell_id is not None:
+                    cell_id = self._add_edge(root, cell_id, prev_cell_id, current_cell_id,
+                                             color_stroke, vertical=True)
+
+                prev_cell_id = current_cell_id
+                y_cursor += box_height + ENTRY_ARROW_GAP
+
+        # --- Thinking summary ---
+        if entry.thinking_summary:
+            y_cursor += 10
+            cell_id = self._add_cell(root, cell_id, "<b>Thinking / Reasoning</b>",
+                "text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;"
+                "strokeColor=none;fillColor=none;fontSize=11;fontStyle=1;fontColor=#777777;",
+                ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, 24)
+            y_cursor += 28
+
+            for thought in entry.thinking_summary:
+                thought_lines = max(1, len(thought) // 70 + 1)
+                thought_height = max(24, thought_lines * ENTRY_LINE_HEIGHT + 8)
                 cell_id = self._add_cell(root, cell_id,
-                    f"<b>{time_str}</b>{compact_label}<br/>{entry.label}",
-                    entry_style,
-                    FLOW_LEFT_MARGIN, y_cursor, FLOW_BOX_WIDTH + 80, FLOW_BOX_HEIGHT)
+                    f"<i>💭 {thought}</i>",
+                    "rounded=1;whiteSpace=wrap;html=1;fillColor=#fafafa;strokeColor=#e0e0e0;"
+                    "fontSize=9;fontColor=#666666;fontStyle=2;align=left;verticalAlign=top;"
+                    "spacingLeft=6;spacingRight=6;spacingTop=4;",
+                    ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, thought_height)
+                y_cursor += thought_height + 6
 
-                y_cursor += FLOW_BOX_HEIGHT + 10
+        # --- Files modified ---
+        if entry.files_modified:
+            y_cursor += 10
+            cell_id = self._add_cell(root, cell_id, "<b>Files Modified</b>",
+                "text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;"
+                "strokeColor=none;fillColor=none;fontSize=11;fontStyle=1;fontColor=#777777;",
+                ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, 24)
+            y_cursor += 28
 
-                # Referenced documents as separate nodes
-                if entry.referenced_documents:
-                    for doc in entry.referenced_documents:
-                        cell_id = self._add_cell(root, cell_id,
-                            f"📄 {doc}",
-                            f"rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#cccccc;fontSize=9;fontColor=#666666;fontStyle=2;align=left;verticalAlign=middle;spacingLeft=6;",
-                            FLOW_LEFT_MARGIN + 40, y_cursor, FLOW_BOX_WIDTH, 30)
-                        y_cursor += 35
+            files_label = "<br/>".join(f"- {f}" for f in entry.files_modified)
+            files_height = max(30, len(entry.files_modified) * ENTRY_LINE_HEIGHT + 12)
+            cell_id = self._add_cell(root, cell_id, files_label,
+                "rounded=1;whiteSpace=wrap;html=1;fillColor=#f0f4f8;strokeColor=#b0bec5;"
+                "fontSize=9;fontColor=#37474f;align=left;verticalAlign=top;"
+                "spacingLeft=6;spacingRight=6;spacingTop=4;",
+                ENTRY_PAGE_LEFT_MARGIN, y_cursor, ENTRY_BOX_WIDTH, files_height)
+            y_cursor += files_height + 10
 
-                if not entry.process_steps:
-                    y_cursor += FLOW_V_GAP
-                    continue
-
-                # Process steps as connected boxes in grid layout with type-based colors
-                prev_cell_id = None
-                for step_idx, step in enumerate(entry.process_steps):
-                    col = step_idx % FLOW_MAX_COLS
-                    row = step_idx // FLOW_MAX_COLS
-
-                    box_x = FLOW_LEFT_MARGIN + 40 + col * (FLOW_BOX_WIDTH + FLOW_H_GAP)
-                    box_y = y_cursor + row * (FLOW_BOX_HEIGHT + FLOW_V_GAP)
-
-                    if isinstance(step, ProcessStep):
-                        fill, stroke, icon = STEP_TYPE_STYLES.get(step.type, STEP_TYPE_STYLES["analysis"])
-                        summary_text = step.summary if len(step.summary) <= 70 else step.summary[:70] + "..."
-                        step_label = f"<b>{icon} {step_idx + 1}</b>. {summary_text}"
-
-                        # Build tooltip with details
-                        step_tooltip = f"[{step.type.upper()}] {step.summary}"
-                        if step.details:
-                            step_tooltip += "\n" + "\n".join(f"  - {d}" for d in step.details[:5])
-
-                        # Taller box if step has details
-                        box_height = FLOW_BOX_HEIGHT + (min(len(step.details), 3) * 14 if step.details else 0)
-
-                        # Decision type gets diamond-like shape (hexagon)
-                        if step.type == "decision":
-                            step_style = f"shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;size=10;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=9;fontColor=#333333;align=left;verticalAlign=top;spacingLeft=12;spacingRight=12;spacingTop=4;"
-                        elif step.type == "verification":
-                            step_style = f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};strokeWidth=2;fontSize=9;fontColor=#333333;align=left;verticalAlign=top;spacingLeft=6;spacingRight=6;spacingTop=4;dashed=1;dashPattern=3 2;"
-                        else:
-                            step_style = f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};strokeWidth=1;fontSize=9;fontColor=#333333;align=left;verticalAlign=top;spacingLeft=6;spacingRight=6;spacingTop=4;"
-
-                        # Add detail lines inside box
-                        if step.details:
-                            detail_html = "<br/>".join(
-                                f"<font style='font-size:8px' color='#666666'>· {d[:60]}</font>"
-                                for d in step.details[:3]
-                            )
-                            step_label += f"<br/>{detail_html}"
-
-                        current_cell_id = cell_id
-                        cell_id = self._add_cell(root, cell_id, step_label,
-                            step_style,
-                            box_x, box_y, FLOW_BOX_WIDTH, box_height,
-                            tooltip=step_tooltip)
-                    else:
-                        # Fallback for plain string steps
-                        step_text = step if len(step) <= 80 else step[:80]
-                        step_label = f"<b>{step_idx + 1}</b>. {step_text}"
-                        box_height = FLOW_BOX_HEIGHT
-                        current_cell_id = cell_id
-                        cell_id = self._add_cell(root, cell_id, step_label,
-                            f"rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor={color_stroke};fontSize=9;fontColor=#333333;align=left;verticalAlign=middle;spacingLeft=6;spacingRight=6;",
-                            box_x, box_y, FLOW_BOX_WIDTH, FLOW_BOX_HEIGHT)
-
-                    # Arrow from previous step
-                    if prev_cell_id is not None and col > 0:
-                        cell_id = self._add_edge(root, cell_id, prev_cell_id, current_cell_id, color_stroke)
-                    prev_cell_id = current_cell_id
-
-                # Update cursor - account for variable height boxes
-                n_rows = (len(entry.process_steps) + FLOW_MAX_COLS - 1) // FLOW_MAX_COLS
-                avg_extra_height = 0
-                for s in entry.process_steps:
-                    if isinstance(s, ProcessStep) and s.details:
-                        avg_extra_height = max(avg_extra_height, min(len(s.details), 3) * 14)
-                y_cursor += n_rows * (FLOW_BOX_HEIGHT + avg_extra_height + FLOW_V_GAP) + 10
-
-                # Thinking summary after process steps (italic gray)
-                if entry.thinking_summary:
-                    for thought in entry.thinking_summary[:3]:
-                        thought_display = thought[:120] if len(thought) > 120 else thought
-                        cell_id = self._add_cell(root, cell_id,
-                            f"<i>💭 {thought_display}</i>",
-                            f"text;html=1;align=left;verticalAlign=middle;resizable=0;points=[];autosize=1;strokeColor=none;fillColor=none;fontSize=8;fontColor=#999999;fontStyle=2;",
-                            FLOW_LEFT_MARGIN + 40, y_cursor, FLOW_BOX_WIDTH * 2, 20)
-                        y_cursor += 22
-
-                y_cursor += 10
-
-            y_cursor += 20
+        # --- Finalize page height ---
+        actual_height = y_cursor + 30
+        graph_model.set("dy", str(actual_height))
+        graph_model.set("pageHeight", str(actual_height))
 
     # ===== Markdown generation =====
 
@@ -830,7 +1135,18 @@ class TimelineDiagramGenerator:
                         lines.append(f"- {t}")
                     lines.append("")
 
-                if entry.process_steps:
+                if entry.process_phases:
+                    lines.append(f"**Work phases** ({len(entry.process_steps)} steps):")
+                    lines.append("")
+                    for i, phase in enumerate(entry.process_phases, 1):
+                        icon = STEP_TYPE_STYLES.get(phase.primary_type, STEP_TYPE_STYLES["analysis"])[2]
+                        lines.append(f"{i}. {icon} **[{phase.primary_type.upper()}]** {phase.phase_name} ({phase.step_count} steps)")
+                        lines.append(f"   *{phase.summary}*")
+                        if phase.key_details:
+                            for detail in phase.key_details:
+                                lines.append(f"   - {detail}")
+                    lines.append("")
+                elif entry.process_steps:
                     lines.append("**Work process**:")
                     lines.append("")
                     for i, step in enumerate(entry.process_steps, 1):
@@ -838,7 +1154,7 @@ class TimelineDiagramGenerator:
                             icon = STEP_TYPE_STYLES.get(step.type, STEP_TYPE_STYLES["analysis"])[2]
                             lines.append(f"{i}. {icon} **[{step.type.upper()}]** {step.summary}")
                             if step.details:
-                                for detail in step.details[:5]:
+                                for detail in step.details:
                                     lines.append(f"   - {detail}")
                         else:
                             lines.append(f"{i}. {step}")
@@ -873,11 +1189,14 @@ class TimelineDiagramGenerator:
                       width=str(width), height=str(height), **{"as": "geometry"})
         return cell_id + 1
 
-    def _add_edge(self, root, cell_id, source_id, target_id, color):
+    def _add_edge(self, root, cell_id, source_id, target_id, color, vertical=False):
+        style = f"edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor={color};"
+        if vertical:
+            style += "exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;"
         ET.SubElement(root, "mxCell", **{
             "id": str(cell_id),
             "value": "",
-            "style": f"edgeStyle=orthogonalEdgeStyle;rounded=1;strokeColor={color};",
+            "style": style,
             "edge": "1", "parent": "1",
             "source": str(source_id), "target": str(target_id),
         })
