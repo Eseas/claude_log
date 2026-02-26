@@ -34,6 +34,7 @@ ENV/
 # Project specific
 logs/
 tasks/
+summaries/
 .processed.json
 organizer.log
 config.yaml
