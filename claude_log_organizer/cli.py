@@ -120,10 +120,12 @@ For more information: https://github.com/yourusername/claude-log-organizer
 
     args = parser.parse_args()
 
-    # If no command specified, show help
+    # If no command specified, launch interactive mode
     if not args.command:
-        parser.print_help()
-        sys.exit(1)
+        from claude_log_organizer.interactive import InteractiveCLI
+        cli = InteractiveCLI()
+        cli.run()
+        return
 
     # Handle commands
     try:
