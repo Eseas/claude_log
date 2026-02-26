@@ -1,0 +1,358 @@
+# Claude Log Organizer
+
+Automated system for organizing Claude conversation logs into structured markdown summaries.
+
+## Overview
+
+Claude Log Organizer monitors a directory for new conversation log files and automatically generates organized markdown summaries that extract and structure key information about the work performed. This makes it easy to review past tasks, track implementation decisions, and build a searchable knowledge base.
+
+## Features
+
+- **Automatic Monitoring**: Watch a directory for new log files and process them automatically
+- **Smart Parsing**: Extracts task summaries, key decisions, file changes, code snippets, and timeline information
+- **Duplicate Prevention**: Uses file hashing to avoid reprocessing unchanged files
+- **Flexible Templates**: Customize output format using Jinja2 templates
+- **Extensible**: Easy to add custom parsers for different log formats
+- **CLI Interface**: Simple commands for all operations
+
+## Installation
+
+### From Source
+
+```bash
+# Clone or download the repository
+cd claude_log
+
+# Install in development mode
+pip install -e .
+```
+
+### Requirements
+
+- Python 3.8+
+- pyyaml>=6.0
+- watchdog>=3.0.0
+- jinja2>=3.1.0
+- python-dateutil>=2.8.0
+
+## Quick Start
+
+### 1. Initialize Configuration
+
+```bash
+claude-log-organizer init
+```
+
+This creates a `config.yaml` file with default settings.
+
+### 2. Edit Configuration
+
+Edit `config.yaml` to customize:
+
+```yaml
+watch:
+  directory: ./logs              # Directory to monitor
+  patterns: ['conversation-task-*.log']
+
+output:
+  directory: ./tasks             # Where to save summaries
+  filename_pattern: 'task-{task_id}.md'
+```
+
+### 3. Start Watching
+
+```bash
+claude-log-organizer watch
+```
+
+This will monitor the configured directory and automatically process new log files.
+
+## Usage
+
+### Watch Mode (Continuous)
+
+Monitor directory for new log files:
+
+```bash
+claude-log-organizer watch
+```
+
+Press `Ctrl+C` to stop.
+
+### Process Single File
+
+Process a specific log file:
+
+```bash
+claude-log-organizer process logs/conversation-task-20260212-130624.log
+```
+
+### Batch Processing
+
+Process all matching files in a directory:
+
+```bash
+claude-log-organizer batch ./logs
+```
+
+Force reprocess all files (ignoring processed history):
+
+```bash
+claude-log-organizer batch ./logs --force
+```
+
+### Clear History
+
+Clear the processed files registry:
+
+```bash
+claude-log-organizer clear
+```
+
+## Configuration
+
+### Full Configuration Example
+
+```yaml
+# File watching settings
+watch:
+  directory: ./logs
+  patterns:
+    - "conversation-task-*.log"
+  poll_interval: 1.0
+  recursive: false
+
+# Output settings
+output:
+  directory: ./tasks
+  filename_pattern: "task-{task_id}.md"
+  overwrite: false
+
+# Parsing settings
+parsing:
+  extract_code_snippets: true
+  max_snippet_lines: 50
+  extract_phases: true
+  extract_decisions: true
+  extract_file_changes: true
+
+# Template settings
+templates:
+  directory: ./templates
+  default_template: "default.md.jinja2"
+
+# Storage settings
+storage:
+  processed_log: ".processed.json"
+  enable_cache: true
+
+# Logging settings
+logging:
+  level: INFO
+  file: "organizer.log"
+  format: "[%(asctime)s] [%(levelname)s] %(message)s"
+```
+
+## Log File Format
+
+### Supported Formats
+
+1. **Conversation Logs**: `conversation-task-{id}.log`
+   - Full conversation dialogue
+   - Extracts summaries, decisions, file changes, code snippets
+
+2. **Timeline Logs**: `timeline.log`
+   - Phase markers: `[PHASE] phase_name`
+   - Checkpoint markers: `[CHECKPOINT] checkpoint_name`
+   - Extracts timing and duration information
+
+### Input File Naming
+
+Log files should follow this naming pattern:
+
+```
+conversation-task-{task_id}.log
+```
+
+Example: `conversation-task-20260212-130624.log`
+
+The `{task_id}` will be extracted and used in the output filename.
+
+## Output Format
+
+Generated markdown files include:
+
+- **Task Summary**: Task ID, status, timestamp, duration
+- **Summary**: Work performed and approach taken
+- **Implementation Details**: Files created/modified, key decisions, architecture patterns
+- **Timeline**: Phase information with timestamps
+- **Validation**: Review and test status
+- **Code Examples**: Extracted code snippets
+
+### Example Output
+
+```markdown
+# Task Summary: 20260212-130624
+
+**Status**: ✅ completed
+**Timestamp**: 2026-02-12 13:06:24
+**Duration**: 5m 17s
+
+---
+
+## Summary
+
+Implemented hexagonal architecture-based Admin authentication module...
+
+---
+
+## Implementation Details
+
+### Files Created
+- `module-admin/src/main/java/.../Admin.java`
+
+### Key Technical Decisions
+- Use hexagonal architecture for clean separation
+- Extend JWT token to include role claim
+
+---
+
+## Timeline
+
+- **validation_start**: 2026-02-12 13:06:24
+- **validation_done**: 2026-02-12 13:06:24
+- **architect_start**: 2026-02-12 13:06:25
+- **implementation_done**: 2026-02-12 13:12:27
+
+---
+
+*Generated by Claude Log Organizer*
+```
+
+## Customization
+
+### Custom Templates
+
+Create a new template in the `templates/` directory:
+
+```jinja2
+# {{ task.task_id }}
+
+**Status**: {{ task.status }}
+
+## Summary
+{{ task.work_summary }}
+
+## Files Changed
+{% for file in task.files_modified %}
+- {{ file }}
+{% endfor %}
+```
+
+Update `config.yaml`:
+
+```yaml
+templates:
+  default_template: "my-template.md.jinja2"
+```
+
+### Custom Parsers
+
+Create a custom parser for different log formats:
+
+```python
+from claude_log_organizer.parsers import BaseLogParser
+from claude_log_organizer.models.task_data import TaskData
+
+class MyCustomParser(BaseLogParser):
+    def can_parse(self, file_path):
+        return 'custom' in file_path.name
+
+    def parse(self, file_path):
+        content = self._read_file(file_path)
+        # Custom parsing logic
+        return TaskData(
+            task_id=self._extract_task_id(file_path),
+            work_summary="...",
+            # ...
+        )
+```
+
+Register the parser in your application:
+
+```python
+from claude_log_organizer.main import LogOrganizerApp
+
+app = LogOrganizerApp()
+app.parser_factory.register_parser(MyCustomParser())
+```
+
+## Troubleshooting
+
+### Log File Not Processed
+
+1. Check file matches pattern in `config.yaml`
+2. Check file is not already in `.processed.json`
+3. Check file is valid (not empty, readable)
+4. Check `organizer.log` for error messages
+
+### Output File Not Created
+
+1. Check output directory exists or can be created
+2. Check `overwrite` setting if file already exists
+3. Check template file exists in templates directory
+4. Check `organizer.log` for error messages
+
+### Watch Mode Not Detecting Files
+
+1. Check watch directory path is correct
+2. Check file patterns are correct
+3. Try using absolute paths in config
+4. Check file system permissions
+
+## Development
+
+### Project Structure
+
+```
+claude_log_organizer/
+├── claude_log_organizer/
+│   ├── cli.py              # Command-line interface
+│   ├── config.py           # Configuration management
+│   ├── main.py             # Application orchestrator
+│   ├── parsers/            # Log parsers
+│   ├── generators/         # Markdown generator
+│   ├── models/             # Data models
+│   ├── watcher/            # File monitoring
+│   └── storage/            # Processed file tracking
+├── templates/              # Jinja2 templates
+├── requirements.txt
+├── setup.py
+└── README.md
+```
+
+### Running Tests
+
+```bash
+# Install dev dependencies
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# With coverage
+pytest --cov=claude_log_organizer
+```
+
+## License
+
+MIT License
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Support
+
+For issues and questions:
+- GitHub Issues: https://github.com/yourusername/claude-log-organizer/issues

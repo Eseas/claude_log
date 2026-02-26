@@ -1,0 +1,12 @@
+[2026-02-13 15:16:16] START hook triggered
+  Project: claude_log
+  Args: 
+
+[2026-02-13 15:16:20] STOP hook triggered
+  Project: claude_log
+
+[2026-02-13 15:22:25] UserPromptSubmit: 이 프로젝트 구조 보여줘
+[2026-02-13 15:22:44] UserPromptSubmit: 이건 테스트 전송이야.
+[2026-02-13 15:22:48] STOP hook triggered
+  Project: claude_log
+

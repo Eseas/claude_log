@@ -1,0 +1,16 @@
+#!/bin/bash
+# UserPromptSubmit hook - Git modified files only
+
+# Read JSON from stdin
+INPUT=$(cat)
+
+# Get modified files from git status (fast, accurate)
+MODIFIED=$(git status --short 2>/dev/null | awk '{print $2}' | head -5 | tr '\n' ', ' | sed 's/,$//')
+
+# Output as additional context if files exist
+if [ -n "$MODIFIED" ]; then
+    jq -n --arg ctx "📝 Currently modified: $MODIFIED" '{additionalContext: $ctx}'
+    exit 0
+fi
+
+exit 0

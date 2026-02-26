@@ -1,0 +1,13 @@
+{
+  "allowedTools": [
+    "Read(tasks/**)",
+    "Write(summaries/session-*_summary.md)",
+    "Write(summaries/session-*_efficiency.md)",
+    "Edit(summaries/session-*_summary.md)",
+    "Edit(summaries/session-*_efficiency.md)"
+  ],
+  "allowedDirectories": [
+    "tasks",
+    "summaries"
+  ]
+}

@@ -1,0 +1,23 @@
+#!/bin/bash
+# Project-specific stop hook for claude_log
+# 대화 종료 시 자동으로 로그 정리
+
+LOG_FILE="$(pwd)/.claude/hook-events.log"
+
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] STOP hook triggered" >> "$LOG_FILE"
+echo "  Project: $(basename $(pwd))" >> "$LOG_FILE"
+echo "" >> "$LOG_FILE"
+
+# Auto-organize logs
+PROJECT_ROOT="$(pwd)"
+if [ -f "$PROJECT_ROOT/claude_log_organizer/cli.py" ]; then
+    # Find latest log
+    LATEST_LOG=$(ls -t ~/.claude/logs/*.log 2>/dev/null | head -n 1)
+
+    if [ -n "$LATEST_LOG" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] Auto-organizing: $LATEST_LOG" >> "$LOG_FILE"
+
+        # Process in background
+        (cd "$PROJECT_ROOT" && python3 -m claude_log_organizer.cli process "$LATEST_LOG" >> "$LOG_FILE" 2>&1) &
+    fi
+fi

@@ -1,0 +1,97 @@
+# Claude Log Organizer Configuration
+
+# File watching settings
+watch:
+  # Directories to monitor for new log files
+  # IMPORTANT: Use ABSOLUTE PATHS only (no ./logs or ../logs)
+  # Can be a single directory (string) or multiple directories (list)
+  directories:
+    - /Users/username/Desktop/mine/claude_log/logs
+    - /Users/username/Documents/project_logs
+    - /Users/username/Desktop/workspace/project/.claude/logs
+    # - /Volumes/ExternalDrive/backup_logs
+
+  # File patterns to match (supports wildcards)
+  # Applied to all directories
+  patterns:
+    - "conversation-task-*.log"
+
+  # Polling interval in seconds
+  poll_interval: 1.0
+
+  # Watch subdirectories recursively
+  recursive: false
+
+  # Debounce delay in seconds - wait this long after last file modification
+  # before processing. This prevents repeated processing while file is being written.
+  debounce_delay: 3.0
+
+# Output settings
+output:
+  # Directory where markdown summaries will be saved
+  directory: ./tasks
+
+  # Directory where AI-generated session summaries will be saved
+  summaries_directory: ./summaries
+
+  # Output filename pattern ({task_id} will be replaced)
+  filename_pattern: "task-{task_id}.md"
+
+  # Overwrite existing output files
+  overwrite: false
+
+# Parsing settings
+parsing:
+  # Extract code snippets from logs
+  extract_code_snippets: true
+
+  # Maximum lines per code snippet
+  max_snippet_lines: 50
+
+  # Extract phase/timeline information
+  extract_phases: true
+
+  # Extract key decisions
+  extract_decisions: true
+
+  # Extract file changes (created/modified)
+  extract_file_changes: true
+
+# Template settings
+templates:
+  # Directory containing Jinja2 templates
+  directory: ./templates
+
+  # Default template to use
+  default_template: "default.md.jinja2"
+
+# Storage settings
+storage:
+  # File to track processed logs (prevents duplicates)
+  processed_log: ".processed.json"
+
+  # Enable caching of parsed results
+  enable_cache: true
+
+# Logging settings
+logging:
+  # Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  level: INFO
+
+  # Log file path
+  file: "organizer.log"
+
+  # Log message format
+  format: "[%(asctime)s] [%(levelname)s] %(message)s"
+
+# AI summarization settings (optional)
+ai:
+  # Claude API key (get from https://console.anthropic.com/account/keys)
+  # Leave empty to be prompted when needed
+  api_key: ""
+
+  # Model to use for summarization
+  model: "claude-3-5-sonnet-20241022"
+
+  # Maximum tokens for summary
+  max_tokens: 2048
