@@ -6,6 +6,45 @@ from typing import List, Dict, Any, Optional, Union
 
 
 @dataclass
+class TokenUsage:
+    """Token usage statistics for a conversation."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_tokens: int = 0
+    request_count: int = 0
+
+    def __post_init__(self):
+        self.total_tokens = (
+            self.input_tokens + self.output_tokens
+            + self.cache_read_tokens + self.cache_write_tokens
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for template rendering."""
+        return {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+            "cache_write_tokens": self.cache_write_tokens,
+            "total_tokens": self.total_tokens,
+            "request_count": self.request_count,
+        }
+
+    def add(self, other: 'TokenUsage') -> 'TokenUsage':
+        """Merge another TokenUsage into this one (returns new instance)."""
+        return TokenUsage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
+            request_count=self.request_count + other.request_count,
+        )
+
+
+@dataclass
 class CodeSnippet:
     """Represents a code snippet extracted from logs."""
 
@@ -99,6 +138,9 @@ class TaskData:
     # Reference documents
     referenced_documents: List[str] = field(default_factory=list)
 
+    # Token usage
+    token_usage: Optional['TokenUsage'] = None
+
     # Additional metadata
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -123,6 +165,7 @@ class TaskData:
             "thinking_summary": self.thinking_summary,
             "tool_results_summary": self.tool_results_summary,
             "referenced_documents": self.referenced_documents,
+            "token_usage": self.token_usage.to_dict() if self.token_usage else None,
             "review_passed": self.review_passed,
             "test_passed": self.test_passed,
             "metadata": self.metadata,
@@ -184,3 +227,9 @@ class TimelineEntry:
     thinking_summary: List[str] = field(default_factory=list)  # 사고 과정 요약
     compact_count: int = 0   # 컨텍스트 압축 횟수
     referenced_documents: List[str] = field(default_factory=list)  # 참조 문서
+    token_usage: Optional['TokenUsage'] = None  # 토큰 사용량
+    # Session metadata for analysis
+    user_message_count: int = 0
+    tool_use_count: int = 0
+    assistant_response_count: int = 0
+    thinking_count: int = 0

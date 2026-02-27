@@ -12,7 +12,7 @@ Claude Code 대화 종료
 │  JSONL Transcript    │────▶│  save-conversation  │
 │  (.claude/projects/) │     │  -log.sh (Stop Hook)│
 └─────────────────────┘     └────────┬───────────┘
-                                     │
+                                     │ 증분 추출
                                      ▼
                             ┌────────────────────┐
                             │  .log 파일           │
@@ -61,9 +61,12 @@ Claude Code 대화 종료
 
 ### 출력물
 
-1. **`.drawio` 파일** (2페이지)
+1. **`.drawio` 파일** (작업 수 + 1 페이지)
    - **Page 1: Timeline** — Gantt 차트 형태의 시간축 타임라인
-   - **Page 2: Process Flow** — 세션별 작업 흐름도 (단계 유형별 색상/모양 구분)
+   - **Page 2~N: 작업별 상세 페이지** — 각 작업(entry)마다 수직 플로우 다이어그램
+     - 페이지 이름: 해당 작업의 초기 요청 내용
+     - phase/step을 수직 화살표로 연결
+     - Thinking 사고 과정 및 수정 파일 목록 포함
 
 2. **Companion `.md` 파일** — 상세 작업 과정 마크다운
 
@@ -79,6 +82,31 @@ Claude Code 대화 종료
 | ✅ | VERIFICATION | 테스트, 검증, 빌드 확인 | 보라색 점선 사각형 |
 | 📋 | SUMMARY | 결과 정리, 요약, 완료 보고 | 갈색 둥근 사각형 |
 
+### Phase 요약 파이프라인
+
+한 작업의 step이 8개를 초과하면 자동으로 phase 그룹화가 실행됩니다:
+
+```
+Step > 8개
+   │
+   ▼
+Stage 1: 알고리즘 그룹화 (연속 동일 type 병합)
+   │
+   ├─ ≤ 8개 phase → 사용
+   │
+   ▼
+Stage 2: AI 요약 (Claude CLI로 5~8개 phase로 그룹화)
+   │
+   ├─ 성공 → 캐시 저장 후 사용
+   │
+   ▼
+Stage 3: 등분 청킹 (~6개 phase로 축소)
+```
+
+- **Stage 1**: 연속된 동일 type의 step을 하나의 phase로 병합
+- **Stage 2**: Claude CLI(`claude --print`)로 AI 기반 의미 그룹화 (캐시: `summaries/.phase_cache.json`)
+- **Stage 3**: AI 사용 불가 시 등분 분할로 ~6개 phase 생성
+
 ### Companion Markdown 예시
 
 ```markdown
@@ -88,14 +116,21 @@ Claude Code 대화 종료
 
 #### 15:42 - 16:24 | 로직상 이상한 부분이 있는지 확인
 
-**Work process**:
+**Work phases** (45 steps):
 
-1. ⚡ **[DECISION]** 두 컨트롤러를 비교 분석한 결과, 주요 이슈를 발견했습니다.
-2. ✅ **[VERIFICATION]** 서비스 레이어까지 추적해서 확인하겠습니다.
-3. 🔧 **[IMPLEMENTATION]** 모든 코드를 확인했습니다. 이제 7개 버그를 수정하겠습니다.
-   - B2B rejectMeeting 히스토리 enum 수정
-   - PSA reRequestMeeting 권한 체크 수정
-4. 📋 **[SUMMARY]** 수정 완료 요약
+1. 🔍 **[ANALYSIS]** 프로젝트 구조 분석 (8 steps)
+   *프로젝트 파일 구조와 관련 모듈을 분석하여 구현 방향을 파악*
+   - cli.py, interactive.py 구조 확인
+   - 기존 파서와 생성기 패턴 이해
+2. ⚡ **[DECISION]** 구현 방식 결정 (5 steps)
+   *draw.io XML 형식으로 타임라인 생성 방식 결정*
+   - 추가 의존성 없이 xml.etree 사용
+3. 🔧 **[IMPLEMENTATION]** 코드 구현 (28 steps)
+   *TimelineEntry 모델과 다이어그램 생성기 구현*
+   - timeline_diagram.py 신규 생성
+   - CLI timeline 서브커맨드 추가
+4. 📋 **[SUMMARY]** 결과 정리 (4 steps)
+   *테스트 완료 후 결과 요약*
 ```
 
 ## 설치
@@ -203,9 +238,9 @@ claude_log/
 │   ├── main.py                     # 앱 오케스트레이터
 │   ├── generators/
 │   │   ├── markdown_generator.py   # Jinja2 마크다운 생성기
-│   │   └── timeline_diagram.py     # draw.io 타임라인 + companion md
+│   │   └── timeline_diagram.py     # draw.io 타임라인 + phase 요약 + companion md
 │   ├── models/
-│   │   └── task_data.py            # TaskData, TimelineEntry, ProcessStep
+│   │   └── task_data.py            # TaskData, TimelineEntry, ProcessPhase, ProcessStep
 │   ├── parsers/
 │   │   ├── base_parser.py          # 파서 베이스 클래스
 │   │   ├── conversation_parser.py  # conversation-task-*.log 파서
@@ -245,11 +280,9 @@ watch:
     - '*.log'
   poll_interval: 1.0
   recursive: false
-  debounce_delay: 3.0
 
 output:
   directory: ./tasks
-  summaries_directory: ./summaries
   filename_pattern: task-{task_id}.md
   overwrite: false
 

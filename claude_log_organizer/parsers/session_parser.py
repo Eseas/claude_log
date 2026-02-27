@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 
 from claude_log_organizer.parsers.base_parser import BaseLogParser
-from claude_log_organizer.models.task_data import TaskData, CodeSnippet
+from claude_log_organizer.models.task_data import TaskData, CodeSnippet, TokenUsage
 
 
 class ClaudeSessionLogParser(BaseLogParser):
@@ -55,6 +55,7 @@ class ClaudeSessionLogParser(BaseLogParser):
         tool_results = self._extract_tool_results(content)
         documents = self._extract_documents(content)
         compact_count = self._extract_compact_count(content)
+        token_usage = self._extract_token_usage(content)
 
         # Generate work summary
         work_summary = self._generate_work_summary(user_messages, tool_uses, assistant_responses)
@@ -78,6 +79,7 @@ class ClaudeSessionLogParser(BaseLogParser):
             thinking_summary=thinking_blocks,
             tool_results_summary=tool_results,
             referenced_documents=documents,
+            token_usage=token_usage,
             status="completed",
             metadata={
                 "project_path": project_path,
@@ -350,6 +352,36 @@ class ClaudeSessionLogParser(BaseLogParser):
     def _extract_compact_count(self, content: str) -> int:
         """Count context compression occurrences."""
         return len(re.findall(r'\[COMPACT\]', content))
+
+    def _extract_token_usage(self, content: str) -> Optional[TokenUsage]:
+        """Extract and aggregate token usage from [USAGE] tags.
+
+        Format: [USAGE] input:N cache_read:N cache_write:N output:N
+        """
+        pattern = r'\[USAGE\]\s*input:(\d+)\s+cache_read:(\d+)\s+cache_write:(\d+)\s+output:(\d+)'
+        matches = re.findall(pattern, content)
+
+        if not matches:
+            return None
+
+        total_input = 0
+        total_output = 0
+        total_cache_read = 0
+        total_cache_write = 0
+
+        for m in matches:
+            total_input += int(m[0])
+            total_cache_read += int(m[1])
+            total_cache_write += int(m[2])
+            total_output += int(m[3])
+
+        return TokenUsage(
+            input_tokens=total_input,
+            output_tokens=total_output,
+            cache_read_tokens=total_cache_read,
+            cache_write_tokens=total_cache_write,
+            request_count=len(matches),
+        )
 
     def _extract_thinking_decisions(self, thinking_blocks: List[str]) -> List[str]:
         """Extract decision-related sentences from thinking summaries."""

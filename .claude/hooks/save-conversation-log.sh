@@ -3,7 +3,7 @@
 # 매 Stop 이벤트마다 새 파일을 생성하되, 이전에 기록한 내용은 건너뛰고
 # 새로운 대화 내용만 기록
 # 추출 태그: [USER], [ASSISTANT], [TOOL], [THINKING], [TOOL_RESULT],
-#            [DOCUMENT], [SNAPSHOT], [COMPACT]
+#            [DOCUMENT], [SNAPSHOT], [COMPACT], [USAGE]
 
 INPUT=$(cat)
 TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path')
@@ -171,6 +171,21 @@ tail -n +$((PROCESSED_LINES + 1)) "$TRANSCRIPT_PATH" | while IFS= read -r line; 
     ')
     if [ -n "$TOOLS" ]; then
       echo "$TOOLS" >> "$LOG_FILE"
+      echo "" >> "$LOG_FILE"
+    fi
+
+    # 토큰 사용량 추출
+    USAGE=$(echo "$line" | jq -r '
+      .message.usage as $u |
+      if $u != null then
+        "[USAGE] input:" + (($u.input_tokens // 0) | tostring) +
+        " cache_read:" + (($u.cache_read_input_tokens // 0) | tostring) +
+        " cache_write:" + (($u.cache_creation_input_tokens // 0) | tostring) +
+        " output:" + (($u.output_tokens // 0) | tostring)
+      else empty end
+    ')
+    if [ -n "$USAGE" ]; then
+      echo "$USAGE" >> "$LOG_FILE"
       echo "" >> "$LOG_FILE"
     fi
 

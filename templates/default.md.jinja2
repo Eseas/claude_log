@@ -78,6 +78,29 @@ No summary available
 {% endfor %}
 {% endif %}
 
+{% if task.token_usage %}
+### Token Usage
+| Type | Tokens |
+|------|--------|
+| Input | {{ task.token_usage.input_tokens | format_number }} |
+| Output | {{ task.token_usage.output_tokens | format_number }} |
+| Cache Read | {{ task.token_usage.cache_read_tokens | format_number }} |
+| Cache Write | {{ task.token_usage.cache_write_tokens | format_number }} |
+| **Total** | **{{ task.token_usage.total_tokens | format_number }}** |
+
+**API Requests**: {{ task.token_usage.request_count }}회
+{% endif %}
+
+{% if task.metadata.user_message_count is defined %}
+### Session Stats
+| Metric | Count |
+|--------|-------|
+| User Messages | {{ task.metadata.user_message_count | default(0) }} |
+| Assistant Responses | {{ task.metadata.assistant_response_count | default(0) }} |
+| Tool Uses | {{ task.metadata.tool_use_count | default(0) }} |
+| Thinking Blocks | {{ task.metadata.thinking_count | default(0) }} |
+{% endif %}
+
 {% if task.metadata.compact_count and task.metadata.compact_count > 0 %}
 **Context Compressions**: {{ task.metadata.compact_count }}회
 {% endif %}

@@ -73,6 +73,7 @@ class MarkdownGenerator:
         self.env.filters["status_emoji"] = self._status_emoji
         self.env.filters["truncate_text"] = self._truncate_text
         self.env.filters["format_seconds"] = self._format_seconds
+        self.env.filters["format_number"] = self._format_number
 
     @staticmethod
     def _format_timestamp(timestamp: str) -> str:
@@ -133,6 +134,20 @@ class MarkdownGenerator:
             return text
 
         return text[:length] + "..."
+
+    @staticmethod
+    def _format_number(value: int) -> str:
+        """Format number with comma separators.
+
+        Args:
+            value: Integer value
+
+        Returns:
+            Formatted string with commas
+        """
+        if value is None:
+            return "0"
+        return f"{int(value):,}"
 
     @staticmethod
     def _format_seconds(seconds: float) -> str:

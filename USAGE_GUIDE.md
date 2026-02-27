@@ -9,6 +9,7 @@
 - [Hook 설정](#hook-설정)
 - [설정 파일](#설정-파일-configyaml)
 - [출력물](#출력물)
+- [타임라인 다이어그램 상세](#타임라인-다이어그램-상세)
 - [문제 해결](#문제-해결)
 
 ---
@@ -116,7 +117,7 @@ Session 기반, Date 기반 모두 동일한 분석 타입을 선택할 수 있�
 |-----------|------|------|
 | 일반 요약 | 세션/기간 작업 종합 요약 | `summaries/*_summary.md` |
 | 효율성 분석 | 프롬프트 효율성 평가 + 개선 제안 | `summaries/*_efficiency.md` |
-| 타임라인 다이어그램 | Gantt 차트 + 작업 흐름도 (AI 불필요) | `summaries/*_timeline.drawio` + `.md` |
+| 타임라인 다이어그램 | Gantt 차트 + 작업별 상세 플로우 (AI 불필요) | `summaries/*_timeline.drawio` + `.md` |
 
 #### Step 4: AI 방식 선택 (일반 요약/효율성 분석만 해당, 타임라인은 건너뜀)
 
@@ -275,11 +276,9 @@ watch:
     - '*.log'
   poll_interval: 1.0       # 폴링 주기 (초)
   recursive: false          # 하위 디렉토리 포함 여부
-  debounce_delay: 3.0       # 파일 변경 후 대기 시간 (초)
 
 output:
   directory: ./tasks                    # task 마크다운 출력 디렉토리
-  summaries_directory: ./summaries      # AI 요약 및 타임라인 출력 디렉토리
   filename_pattern: task-{task_id}.md
   overwrite: false
 
@@ -334,7 +333,6 @@ MeetingController 비교 분석 후 7개 버그 수정
 
 ### Key Technical Decisions
 - 보고서 조회 방식을 단일 쿼리로 통합
-- corpIdxWriter 기준으로 변경
 
 ### Thinking Process
 - B2B와 PSA 컨트롤러 비교 분석 결정
@@ -348,16 +346,25 @@ MeetingController 비교 분석 후 7개 버그 수정
 
 ### 2. 타임라인 다이어그램 (`summaries/*_timeline.drawio`)
 
-2페이지 구성의 draw.io 파일:
+작업 수 + 1 페이지 구성의 draw.io 파일:
 
 **Page 1: Timeline** — Gantt 차트 형태의 시간축 타임라인
-- 각 세션을 시간 바로 표시
-- 바 위에 작업 요약 표시
+- 세션별 색상 구분 (6색 팔레트)
+- 시간 바 위에 작업 요약 표시
+- context compression 발생 시 점선 테두리
+- hover tooltip에 전체 작업 과정 표시
 
-**Page 2: Process Flow** — 세션별 작업 흐름도
-- 각 작업 단계가 유형별 색상/모양으로 구분
+**Page 2~N: 작업별 상세 페이지** — 각 작업(merged entry)마다 별도 페이지 생성
+- 페이지 탭 이름: 초기 요청 내용 (최대 40자)
+- 수직 플로우 레이아웃:
+  - 참조 문서 목록
+  - 5가지 유형 색상 범례
+  - phase/step 박스를 수직 화살표로 연결
+  - 각 박스에 유형별 색상/모양 적용
+  - Thinking 사고 과정
+  - 수정된 파일 목록
 
-#### 단계 유형 (ProcessStep)
+#### 단계 유형 (ProcessStep → ProcessPhase)
 
 | 아이콘 | 유형 | 설명 | 스타일 |
 |--------|------|------|--------|
@@ -378,14 +385,22 @@ MeetingController 비교 분석 후 7개 버그 수정
 
 #### 15:42 - 16:24 | 로직상 이상한 부분이 있는지 확인
 
-**Work process**:
+**Work phases** (45 steps):
 
-1. ⚡ **[DECISION]** 두 컨트롤러를 비교 분석한 결과, 주요 이슈를 발견
-2. ✅ **[VERIFICATION]** 서비스 레이어까지 추적해서 확인
-3. 🔧 **[IMPLEMENTATION]** 7개 버그를 수정
-   - B2B rejectMeeting 히스토리 enum 수정
-   - PSA reRequestMeeting 권한 체크 수정
-4. 📋 **[SUMMARY]** 수정 완료 요약
+1. 🔍 **[ANALYSIS]** 프로젝트 구조 분석 (8 steps)
+   *프로젝트 파일 구조와 관련 모듈을 분석*
+   - cli.py, interactive.py 구조 확인
+   - 기존 파서와 생성기 패턴 이해
+2. ⚡ **[DECISION]** 설계 결정 (5 steps)
+   *타임라인 다이어그램 생성 방식 결정*
+   - draw.io XML 형식 채택
+   - 2페이지 구성: Gantt + Process Flow
+3. 🔧 **[IMPLEMENTATION]** 코드 구현 (28 steps)
+   *TimelineEntry 모델과 다이어그램 생성기 구현*
+   - timeline_diagram.py 신규 생성
+   - CLI timeline 서브커맨드 추가
+4. 📋 **[SUMMARY]** 결과 정리 (4 steps)
+   *테스트 완료 후 결과 요약*
 ```
 
 ### 4. AI 요약 (`summaries/*_summary.md`)
@@ -395,6 +410,52 @@ AI가 생성한 세션/기간 종합 요약.
 ### 5. 효율성 분석 (`summaries/*_efficiency.md`)
 
 프롬프트 효율성 평가 + 개선 제안.
+
+---
+
+## 타임라인 다이어그램 상세
+
+### Phase 요약 파이프라인
+
+한 작업의 step이 8개를 초과하면 자동으로 phase 요약이 실행됩니다:
+
+| 조건 | 동작 |
+|------|------|
+| step ≤ 8 | 개별 step을 그대로 표시 |
+| step > 8, 알고리즘 결과 ≤ 8 | 알고리즘 그룹 사용 (연속 동일 type 병합) |
+| step > 8, 알고리즘 > 8, Claude CLI 가용 | AI 요약 (5~8개 phase) |
+| step > 8, AI 실패 또는 CLI 없음 | 등분 청킹 (~6개 phase) |
+
+### AI 요약 캐시
+
+AI 요약 결과는 `summaries/.phase_cache.json`에 step 내용의 SHA256 해시를 키로 저장됩니다. 동일한 step 구성이면 AI를 재호출하지 않습니다.
+
+### 데이터 모델
+
+```
+ProcessStep (개별 작업 단계)
+├── type: analysis | decision | implementation | verification | summary
+├── summary: 단계 요약 텍스트
+└── details: 세부사항 목록
+
+ProcessPhase (그룹화된 작업 페이즈)
+├── phase_name: 페이즈 이름
+├── primary_type: 지배적 유형
+├── step_count: 포함된 step 수
+├── summary: 페이즈 요약
+└── key_details: 핵심 세부사항
+
+TimelineEntry (타임라인 항목)
+├── session_id / session_short
+├── start_time / end_time
+├── label: 초기 요청 내용
+├── process_steps: ProcessStep 목록
+├── process_phases: ProcessPhase 목록 (요약 시)
+├── thinking_summary: 사고 과정
+├── referenced_documents: 참조 문서
+├── files_modified: 수정 파일
+└── compact_count: 컨텍스트 압축 횟수
+```
 
 ---
 
@@ -420,13 +481,18 @@ AI가 생성한 세션/기간 종합 요약.
 
 1. **절대 경로 사용**: `config.yaml`의 `watch.directories`에 절대 경로 또는 `~` 사용
 2. **디렉토리 존재 여부**: 감시 대상 디렉토리가 실제로 존재하는지 확인
-3. **debounce 대기**: 파일 변경 후 `debounce_delay` (기본 3초) 만큼 대기
 
 ### 출력 파일이 생성되지 않음
 
 1. **출력 디렉토리 확인**: `tasks/`, `summaries/` 디렉토리 존재 여부
 2. **템플릿 확인**: `templates/default.md.jinja2` 존재 여부
 3. **overwrite 설정**: 동일 파일이 있고 `output.overwrite: false`이면 건너뜀
+
+### 타임라인 생성 시 Phase 요약 안 됨
+
+- Claude Code 내부에서 실행하면 nested session 제한으로 Claude CLI 호출이 실패합니다
+- 이 경우 알고리즘 폴백(등분 청킹)이 자동으로 사용됩니다
+- 캐시된 AI 요약이 있으면 CLI 없이도 사용됩니다
 
 ### 로그 레벨 변경
 
