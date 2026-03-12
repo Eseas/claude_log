@@ -328,6 +328,14 @@ class InteractiveCLI:
             self._generate_token_analysis(all_files, range_label)
             return
 
+        # Task success analysis (heuristic always, AI optional)
+        if analysis_type == "task_success":
+            # Collect log files for selected sessions
+            log_files = self._find_log_files_for_sessions(selected_sessions)
+            range_label = f"session-{selected_sessions[0][:8]}" if len(selected_sessions) == 1 else f"sessions-{len(selected_sessions)}"
+            self._generate_task_success_analysis(log_files, range_label)
+            return
+
         # Ask for AI method
         ai_method = self._select_ai_method()
         if not ai_method:
@@ -428,6 +436,7 @@ class InteractiveCLI:
                     ("효율성 분석 - 프롬프트 효율성 + 개선 제안", "efficiency"),
                     ("타임라인 다이어그램 - 시간대별 작업 시각화 (.drawio)", "timeline"),
                     ("토큰 사용량 분석 - 고사용 세션 식별 + 감량 전략", "token_analysis"),
+                    ("작업 성공/실패 분석 - 시그널 + AI 판정", "task_success"),
                     ("취소", "cancel"),
                 ],
             )
@@ -1114,6 +1123,12 @@ class InteractiveCLI:
             self._generate_token_analysis(selected_files, range_label)
             return
 
+        # Task success analysis
+        if analysis_type == "task_success":
+            log_files = self._find_log_files_for_task_files(selected_files)
+            self._generate_task_success_analysis(log_files, range_label)
+            return
+
         ai_method = self._select_ai_method()
         if not ai_method:
             return
@@ -1220,6 +1235,117 @@ class InteractiveCLI:
             print(f"  ✓ 분석 완료: {output_path}")
             print()
             for line in analysis_lines:
+                print(f"  {line}")
+            print()
+
+        except Exception as e:
+            print(f"  ❌ 오류: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _find_log_files_for_sessions(self, session_ids: List[str]) -> List[Path]:
+        """Find .log files matching given session IDs."""
+        config = Config(self.config_path) if self.config_path.exists() else Config(None)
+        log_dir = Path(config.get("input.log_directory", ".claude/logs"))
+        if not log_dir.exists():
+            return []
+
+        log_files = []
+        for log_file in sorted(log_dir.glob("*.log")):
+            for sid in session_ids:
+                if sid in log_file.name:
+                    log_files.append(log_file)
+                    break
+        return log_files
+
+    def _find_log_files_for_task_files(self, task_files: List[Path]) -> List[Path]:
+        """Find .log files that correspond to given task files (by session ID)."""
+        import re as _re
+
+        session_ids = set()
+        for tf in task_files:
+            match = _re.search(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', tf.name)
+            if match:
+                session_ids.add(match.group(1))
+
+        if not session_ids:
+            return []
+
+        return self._find_log_files_for_sessions(list(session_ids))
+
+    def _generate_task_success_analysis(self, log_files: List[Path], range_label: str):
+        """Generate task success/failure analysis.
+
+        Args:
+            log_files: List of .log files to analyze
+            range_label: Descriptive label
+        """
+        from claude_log_organizer.analyzers.task_success_analyzer import TaskSuccessAnalyzer
+
+        if not log_files:
+            print("\n  ❌ 분석할 로그 파일을 찾을 수 없습니다.")
+            print("     (.claude/logs/ 디렉토리에 해당 세션의 로그가 있는지 확인하세요)\n")
+            return
+
+        # Ask whether to use AI
+        use_ai = False
+        try:
+            questions = [
+                inquirer.List(
+                    "ai",
+                    message="AI 분석도 함께 실행할까요? (Claude CLI 필요)",
+                    choices=[
+                        ("시그널 분석만 (빠름)", False),
+                        ("시그널 + AI 분석 (더 정확)", True),
+                    ],
+                )
+            ]
+            answers = inquirer.prompt(questions)
+            if answers:
+                use_ai = answers["ai"]
+        except Exception:
+            pass
+
+        print(f"\n⏳ 작업 성공/실패 분석 중... ({len(log_files)}개 로그 파일)\n")
+
+        try:
+            analyzer = TaskSuccessAnalyzer()
+            all_interactions = analyzer.analyze_log_files(log_files, use_ai=use_ai)
+
+            if not all_interactions:
+                print("  ❌ 분석 가능한 상호작용이 없습니다.\n")
+                return
+
+            report_lines = analyzer.generate_report(all_interactions)
+
+            # Build output file
+            config = Config(self.config_path) if self.config_path.exists() else Config(None)
+            summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+            summaries_dir.mkdir(parents=True, exist_ok=True)
+
+            output_path = summaries_dir / f"{range_label}_task_success.md"
+
+            display_label = range_label.replace("-", " ", 1).replace("_to_", " ~ ")
+            content_lines = [
+                f"# Task Success Analysis: {display_label}",
+                f"",
+                f"**분석 대상**: {len(log_files)}개 로그 파일, {len(all_interactions)}개 상호작용",
+                f"**분석 방법**: 시그널 기반" + (" + AI 기반" if use_ai else ""),
+                f"",
+                "---",
+                "",
+            ]
+            content_lines.extend(report_lines)
+            content_lines.append("")
+            content_lines.append("---")
+            content_lines.append("*Generated by Claude Log Organizer*")
+
+            output_path.write_text("\n".join(content_lines), encoding="utf-8")
+
+            # Print to console
+            print(f"  ✓ 분석 완료: {output_path}")
+            print()
+            for line in report_lines:
                 print(f"  {line}")
             print()
 

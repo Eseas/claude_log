@@ -190,6 +190,41 @@ class TaskData:
 
 
 @dataclass
+class TaskInteraction:
+    """A single task interaction: user request → assistant work → user feedback."""
+
+    request: str                          # User's original request
+    assistant_work: List[str] = field(default_factory=list)   # Assistant responses
+    tools_used: List[Dict[str, str]] = field(default_factory=list)  # Tools executed
+    tool_results: List[str] = field(default_factory=list)     # Tool execution results
+    feedback: Optional[str] = None        # Next user message (None if last interaction)
+
+    # Analysis results
+    heuristic_result: Optional[str] = None   # "success", "failure", "partial", "unknown"
+    heuristic_confidence: float = 0.0        # 0.0 ~ 1.0
+    heuristic_signals: List[str] = field(default_factory=list)  # Detected signal descriptions
+
+    ai_result: Optional[str] = None          # "success", "failure", "partial", "unknown"
+    ai_confidence: float = 0.0
+    ai_reasoning: str = ""                   # AI's explanation
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "request": self.request,
+            "assistant_work": self.assistant_work,
+            "tools_used": self.tools_used,
+            "tool_results": self.tool_results,
+            "feedback": self.feedback,
+            "heuristic_result": self.heuristic_result,
+            "heuristic_confidence": self.heuristic_confidence,
+            "heuristic_signals": self.heuristic_signals,
+            "ai_result": self.ai_result,
+            "ai_confidence": self.ai_confidence,
+            "ai_reasoning": self.ai_reasoning,
+        }
+
+
+@dataclass
 class ProcessPhase:
     """여러 ProcessStep을 그룹화한 작업 페이즈."""
 
