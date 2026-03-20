@@ -105,8 +105,9 @@ class EventDispatcher:
             logger.info(f"Parsing: {file_path}")
             task_data = parser.parse(file_path)
 
-            # Generate output path
-            output_path = self._get_output_path(task_id)
+            # Generate output path (use project_path from log if available)
+            project_path = task_data.metadata.get('project_path')
+            output_path = self._get_output_path(task_id, project_path=project_path)
 
             # Check if output already exists and overwrite is disabled
             if output_path.exists() and not self.config.get("output.overwrite", False):
@@ -238,16 +239,21 @@ class EventDispatcher:
         # Fallback: use filename without extension
         return file_path.stem
 
-    def _get_output_path(self, task_id: str) -> Path:
+    def _get_output_path(self, task_id: str, project_path: Optional[str] = None) -> Path:
         """Get output path for task markdown.
 
         Args:
             task_id: Task identifier
+            project_path: Project root path from log header (overrides config directory)
 
         Returns:
             Path to output markdown file
         """
-        output_dir = Path(self.config.get("output.directory", "./tasks"))
+        if project_path:
+            output_dir = Path(project_path) / "tasks"
+        else:
+            output_dir = Path(self.config.get("output.directory", "./tasks"))
+
         filename_pattern = self.config.get(
             "output.filename_pattern", "task-{task_id}.md"
         )

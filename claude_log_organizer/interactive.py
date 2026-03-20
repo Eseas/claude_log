@@ -186,17 +186,8 @@ class InteractiveCLI:
     def handle_ai_request_menu(self):
         """Handle AI request menu - Group by session ID or date."""
 
-        # Get output directory from config
-        config = Config(self.config_path) if self.config_path.exists() else Config(None)
-        output_dir = Path(config.get("output.directory", "./tasks"))
-
-        if not output_dir.exists():
-            print(f"\n❌ 출력 디렉토리가 없습니다: {output_dir}")
-            print("   먼저 로그를 처리하세요.\n")
-            return
-
-        # Find all task markdown files
-        task_files = sorted(output_dir.glob("task-*.md"), key=lambda x: x.stat().st_mtime, reverse=True)
+        # Find all task markdown files from project directories
+        task_files = sorted(self._discover_project_task_files(), key=lambda x: x.stat().st_mtime, reverse=True)
 
         if not task_files:
             print(f"\n❌ {output_dir}에 task 파일이 없습니다.")
@@ -598,8 +589,7 @@ class InteractiveCLI:
                 summary = message.content[0].text
 
                 # Save summary with session ID
-                config = Config(self.config_path) if self.config_path.exists() else Config(None)
-                summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+                summaries_dir = self._get_summaries_dir(files)
                 summaries_dir.mkdir(parents=True, exist_ok=True)
                 summary_path = summaries_dir / f"session-{session_id[:8]}_summary.md"
 
@@ -699,8 +689,7 @@ class InteractiveCLI:
                 summary = result.stdout.strip()
 
                 # Save summary with session ID
-                config = Config(self.config_path) if self.config_path.exists() else Config(None)
-                summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+                summaries_dir = self._get_summaries_dir(files)
                 summaries_dir.mkdir(parents=True, exist_ok=True)
                 summary_path = summaries_dir / f"session-{session_id[:8]}_summary.md"
 
@@ -778,8 +767,7 @@ class InteractiveCLI:
                 analysis = result.stdout.strip()
 
                 # Save efficiency analysis
-                config = Config(self.config_path) if self.config_path.exists() else Config(None)
-                summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+                summaries_dir = self._get_summaries_dir(files)
                 summaries_dir.mkdir(parents=True, exist_ok=True)
                 analysis_path = summaries_dir / f"session-{session_id[:8]}_efficiency.md"
 
@@ -858,8 +846,7 @@ class InteractiveCLI:
                 analysis = message.content[0].text
 
                 # Save efficiency analysis
-                config = Config(self.config_path) if self.config_path.exists() else Config(None)
-                summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+                summaries_dir = self._get_summaries_dir(files)
                 summaries_dir.mkdir(parents=True, exist_ok=True)
                 analysis_path = summaries_dir / f"session-{session_id[:8]}_efficiency.md"
 
@@ -1165,8 +1152,7 @@ class InteractiveCLI:
 
         try:
             generator = TimelineDiagramGenerator()
-            config = Config(self.config_path) if self.config_path.exists() else Config(None)
-            summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+            summaries_dir = self._get_summaries_dir(files)
             summaries_dir.mkdir(parents=True, exist_ok=True)
 
             output_path = summaries_dir / f"{range_label}_timeline.drawio"
@@ -1208,8 +1194,7 @@ class InteractiveCLI:
                 return
 
             # Build output
-            config = Config(self.config_path) if self.config_path.exists() else Config(None)
-            summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+            summaries_dir = self._get_summaries_dir(files)
             summaries_dir.mkdir(parents=True, exist_ok=True)
 
             output_path = summaries_dir / f"{range_label}_token_analysis.md"
@@ -1243,19 +1228,90 @@ class InteractiveCLI:
             import traceback
             traceback.print_exc()
 
-    def _find_log_files_for_sessions(self, session_ids: List[str]) -> List[Path]:
-        """Find .log files matching given session IDs."""
+    def _discover_project_task_files(self) -> List[Path]:
+        """Discover task files from all project directories in watch config.
+
+        For each watch directory (e.g. {project}/.claude/logs), derives the project
+        root and looks for task-*.md files in {project}/tasks/.
+        Falls back to config's output.directory if no project tasks are found.
+        """
         config = Config(self.config_path) if self.config_path.exists() else Config(None)
-        log_dir = Path(config.get("input.log_directory", ".claude/logs"))
-        if not log_dir.exists():
-            return []
+        watch_dirs = config.get("watch.directories", [])
+        if isinstance(watch_dirs, str):
+            watch_dirs = [watch_dirs]
+
+        task_files = []
+        seen: set = set()
+
+        for wd_str in watch_dirs:
+            wd = Path(wd_str).expanduser()
+            # Derive project root: {project}/.claude/logs → {project}
+            if wd.name == "logs" and wd.parent.name == ".claude":
+                project_root = wd.parent.parent
+            else:
+                project_root = wd.parent
+
+            tasks_dir = project_root / "tasks"
+            if tasks_dir.exists():
+                for f in tasks_dir.glob("task-*.md"):
+                    key = str(f.resolve())
+                    if key not in seen:
+                        seen.add(key)
+                        task_files.append(f)
+
+        # Fallback to config output.directory
+        if not task_files:
+            output_dir = Path(config.get("output.directory", "./tasks"))
+            task_files = list(output_dir.glob("task-*.md"))
+
+        return task_files
+
+    def _get_summaries_dir(self, files: List[Path]) -> Path:
+        """Get summaries directory derived from task file location.
+
+        If files live in {project}/tasks/, returns {project}/summaries/.
+        Otherwise falls back to config's output.summaries_directory.
+        """
+        if files:
+            parent = files[0].parent
+            if parent.name == "tasks":
+                return parent.parent / "summaries"
+
+        config = Config(self.config_path) if self.config_path.exists() else Config(None)
+        return Path(config.get("output.summaries_directory", "./summaries"))
+
+    def _find_log_files_for_sessions(self, session_ids: List[str]) -> List[Path]:
+        """Find .log files matching given session IDs across all watch directories."""
+        config = Config(self.config_path) if self.config_path.exists() else Config(None)
+
+        # Collect all log directories from watch config
+        watch_dirs = config.get("watch.directories", [])
+        if isinstance(watch_dirs, str):
+            watch_dirs = [watch_dirs]
+
+        log_dirs: List[Path] = [Path(wd).expanduser() for wd in watch_dirs]
+
+        # Add fallback from input.log_directory config
+        fallback = Path(config.get("input.log_directory", ".claude/logs"))
+        if fallback not in log_dirs:
+            log_dirs.append(fallback)
 
         log_files = []
-        for log_file in sorted(log_dir.glob("*.log")):
-            for sid in session_ids:
-                if sid in log_file.name:
-                    log_files.append(log_file)
-                    break
+        seen: set = set()
+
+        for log_dir in log_dirs:
+            if not log_dir.exists():
+                continue
+            for log_file in sorted(log_dir.glob("*.log")):
+                key = str(log_file.resolve())
+                if key in seen:
+                    continue
+                for sid in session_ids:
+                    if sid in log_file.name:
+                        seen.add(key)
+                        log_files.append(log_file)
+                        break
+
         return log_files
 
     def _find_log_files_for_task_files(self, task_files: List[Path]) -> List[Path]:
@@ -1263,15 +1319,41 @@ class InteractiveCLI:
         import re as _re
 
         session_ids = set()
+        project_roots = set()
         for tf in task_files:
             match = _re.search(r'([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})', tf.name)
             if match:
                 session_ids.add(match.group(1))
+            # Derive project root from task file's location ({project}/tasks/task-*.md)
+            if tf.parent.name == "tasks":
+                project_roots.add(tf.parent.parent)
 
         if not session_ids:
             return []
 
-        return self._find_log_files_for_sessions(list(session_ids))
+        # Search in project-relative log dirs first
+        log_files = []
+        seen: set = set()
+
+        for project_root in project_roots:
+            log_dir = project_root / ".claude" / "logs"
+            if not log_dir.exists():
+                continue
+            for log_file in sorted(log_dir.glob("*.log")):
+                key = str(log_file.resolve())
+                if key in seen:
+                    continue
+                for sid in session_ids:
+                    if sid in log_file.name:
+                        seen.add(key)
+                        log_files.append(log_file)
+                        break
+
+        # Fallback to searching across all watch dirs
+        if not log_files:
+            return self._find_log_files_for_sessions(list(session_ids))
+
+        return log_files
 
     def _generate_task_success_analysis(self, log_files: List[Path], range_label: str):
         """Generate task success/failure analysis.
@@ -1318,9 +1400,13 @@ class InteractiveCLI:
 
             report_lines = analyzer.generate_report(all_interactions)
 
-            # Build output file
-            config = Config(self.config_path) if self.config_path.exists() else Config(None)
-            summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+            # Build output file — derive summaries dir from log file's project root
+            # log_files are in {project}/.claude/logs/, so project = parent.parent.parent
+            if log_files and log_files[0].parent.name == "logs" and log_files[0].parent.parent.name == ".claude":
+                summaries_dir = log_files[0].parent.parent.parent / "summaries"
+            else:
+                config = Config(self.config_path) if self.config_path.exists() else Config(None)
+                summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
             summaries_dir.mkdir(parents=True, exist_ok=True)
 
             output_path = summaries_dir / f"{range_label}_task_success.md"
@@ -1414,8 +1500,7 @@ class InteractiveCLI:
         Returns:
             Path to saved file
         """
-        config = Config(self.config_path) if self.config_path.exists() else Config(None)
-        summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+        summaries_dir = self._get_summaries_dir(files)
         summaries_dir.mkdir(parents=True, exist_ok=True)
 
         display_label = range_label.replace("-", " ", 1).replace("_to_", " ~ ")

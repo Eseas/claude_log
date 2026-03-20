@@ -267,17 +267,44 @@ def handle_timeline(args):
     config_path = args.config if args.config.exists() else None
     config = Config(config_path)
 
-    output_dir = Path(config.get("output.directory", "./tasks"))
-    task_files = sorted(output_dir.glob(f"task-{args.date}_*.md"))
+    # Search for task files across all project directories from watch config
+    watch_dirs = config.get("watch.directories", [])
+    if isinstance(watch_dirs, str):
+        watch_dirs = [watch_dirs]
+
+    task_files = []
+    seen: set = set()
+    for wd_str in watch_dirs:
+        wd = Path(wd_str).expanduser()
+        if wd.name == "logs" and wd.parent.name == ".claude":
+            project_root = wd.parent.parent
+        else:
+            project_root = wd.parent
+        for f in sorted((project_root / "tasks").glob(f"task-{args.date}_*.md")):
+            key = str(f.resolve())
+            if key not in seen:
+                seen.add(key)
+                task_files.append(f)
+
+    # Fallback to config output.directory
+    if not task_files:
+        output_dir = Path(config.get("output.directory", "./tasks"))
+        task_files = sorted(output_dir.glob(f"task-{args.date}_*.md"))
 
     if not task_files:
-        print(f"No task files found for {args.date} in {output_dir}")
+        print(f"No task files found for {args.date}")
         sys.exit(1)
 
     print(f"Found {len(task_files)} task files for {args.date}")
 
     generator = TimelineDiagramGenerator()
-    summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+    # Derive summaries dir from first task file's project root
+    first = task_files[0]
+    if first.parent.name == "tasks":
+        summaries_dir = first.parent.parent / "summaries"
+    else:
+        summaries_dir = Path(config.get("output.summaries_directory", "./summaries"))
+    summaries_dir.mkdir(parents=True, exist_ok=True)
     output_path = summaries_dir / f"daily-{args.date}_timeline.drawio"
 
     generator.generate(task_files, f"daily-{args.date}", output_path)

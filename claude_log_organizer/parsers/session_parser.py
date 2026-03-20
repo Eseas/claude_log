@@ -124,7 +124,7 @@ class ClaudeSessionLogParser(BaseLogParser):
         Returns:
             Project path or None
         """
-        match = re.search(r'Project:\s*(.+)', content)
+        match = re.search(r'Project(?:-Root-Path)?:\s*(.+)', content)
         if match:
             return match.group(1).strip()
         return None

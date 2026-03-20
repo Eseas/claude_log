@@ -45,7 +45,7 @@ LOG_FILE="$LOG_DIR/${DATE}_${SESSION_ID}.log"
 
 echo "=== Claude Code Session Log ===" > "$LOG_FILE"
 echo "Session ID: $SESSION_ID" >> "$LOG_FILE"
-echo "Project: $PROJECT_DIR" >> "$LOG_FILE"
+echo "Project-Root-Path: $PROJECT_DIR" >> "$LOG_FILE"
 echo "Saved at: $(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
 echo "Lines: $((PROCESSED_LINES + 1))-${TOTAL_LINES} of ${TOTAL_LINES}" >> "$LOG_FILE"
 echo "================================" >> "$LOG_FILE"
