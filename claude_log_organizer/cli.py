@@ -256,7 +256,7 @@ def handle_timeline(args):
         args: Parsed command-line arguments
     """
     from datetime import date as dt_date
-    from claude_log_organizer.generators.timeline_diagram import TimelineDiagramGenerator
+    from claude_log_organizer.generators.timeline import TimelineDiagramGenerator
 
     try:
         target_date = dt_date.fromisoformat(args.date)
