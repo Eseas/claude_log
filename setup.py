@@ -30,6 +30,8 @@ setup(
         "python-dateutil>=2.8.0",
         "inquirer>=3.1.0",
         "anthropic>=0.18.0",
+        "rich>=13.0.0",
+        "typer>=0.9.0",
     ],
 
     extras_require={

@@ -541,11 +541,10 @@ def generate_token_analysis(files: List[Path], range_label: str, config_path: Pa
 
         output_path.write_text("\n".join(content_lines), encoding="utf-8")
 
-        # Also print summary to console
+        # Also print summary to console (rich-rendered markdown)
         out.print(f"  ✓ 분석 완료: {output_path}")
         out.print()
-        for line in analysis_lines:
-            out.print(f"  {line}")
+        out.markdown("\n".join(analysis_lines))
         out.print()
 
     except Exception as e:
@@ -629,11 +628,10 @@ def generate_task_success_analysis(log_files: List[Path], range_label: str, conf
 
         output_path.write_text("\n".join(content_lines), encoding="utf-8")
 
-        # Print to console
+        # Print to console (rich-rendered markdown)
         out.print(f"  ✓ 분석 완료: {output_path}")
         out.print()
-        for line in report_lines:
-            out.print(f"  {line}")
+        out.markdown("\n".join(report_lines))
         out.print()
 
     except Exception as e:

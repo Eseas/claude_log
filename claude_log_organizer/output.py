@@ -55,6 +55,63 @@ class OutputWriter:
     def warning(self, msg: str) -> None:
         self.print(f"⚠️  {msg}")
 
+    # --- Rich structured output (graceful fallback when rich is unavailable) ---
+
+    def _console(self):
+        """Return a rich Console bound to the current stream, or None."""
+        try:
+            from rich.console import Console
+        except ImportError:
+            return None
+        return Console(file=self._stream)
+
+    def table(self, columns: list, rows: list, title: Optional[str] = None) -> None:
+        """Render a table. Falls back to a plain pipe-table without rich."""
+        console = self._console()
+        if console is None:
+            header = " | ".join(str(c) for c in columns)
+            self.print(header)
+            self.print("-" * len(header))
+            for row in rows:
+                self.print(" | ".join(str(c) for c in row))
+            return
+
+        from rich.table import Table
+        table = Table(title=title)
+        for col in columns:
+            table.add_column(str(col))
+        for row in rows:
+            table.add_row(*[str(c) for c in row])
+        console.print(table)
+
+    def panel(self, content: str, title: Optional[str] = None) -> None:
+        """Render content inside a bordered panel (plain print without rich)."""
+        console = self._console()
+        if console is None:
+            if title:
+                self.print(f"--- {title} ---")
+            self.print(content)
+            return
+        from rich.panel import Panel
+        console.print(Panel(content, title=title))
+
+    def rule(self, title: str = "") -> None:
+        """Render a horizontal rule with an optional centered title."""
+        console = self._console()
+        if console is None:
+            self.print(f"=== {title} ===" if title else "=" * 60)
+            return
+        console.rule(title)
+
+    def markdown(self, md_text: str) -> None:
+        """Render markdown text (raw print without rich)."""
+        console = self._console()
+        if console is None:
+            self.print(md_text)
+            return
+        from rich.markdown import Markdown
+        console.print(Markdown(md_text))
+
 
 # Shared default instance. Modules import this; tests can capture via
 # `out.set_streams(io.StringIO())` since the object identity is shared.

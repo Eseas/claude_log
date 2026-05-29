@@ -57,6 +57,37 @@ class TestOutputWriterSemanticHelpers:
         assert "⚠" in buf.getvalue()
 
 
+class TestRichStructuredOutput:
+    def test_table_renders_columns_and_rows(self):
+        buf = io.StringIO()
+        ow = OutputWriter(stream=buf)
+        ow.table(["Session", "Tokens"], [["abc123", "5,700"]], title="Usage")
+        result = buf.getvalue()
+        assert "Session" in result
+        assert "abc123" in result
+        assert "5,700" in result
+
+    def test_panel_includes_content(self):
+        buf = io.StringIO()
+        ow = OutputWriter(stream=buf)
+        ow.panel("important message", title="Note")
+        assert "important message" in buf.getvalue()
+
+    def test_rule_emits_something(self):
+        buf = io.StringIO()
+        ow = OutputWriter(stream=buf)
+        ow.rule("Section")
+        assert buf.getvalue().strip() != ""
+
+    def test_markdown_renders_heading_text(self):
+        buf = io.StringIO()
+        ow = OutputWriter(stream=buf)
+        ow.markdown("# Title\n\nsome body text")
+        result = buf.getvalue()
+        assert "Title" in result
+        assert "some body text" in result
+
+
 class TestSetStreams:
     def test_set_streams_redirects(self):
         ow = OutputWriter()
