@@ -1,30 +1,21 @@
 """Routes file events to appropriate processors."""
 
-import re
 import logging
-import time
 import threading
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Dict
 
 from claude_log_organizer.parsers.parser_factory import ParserFactory
 from claude_log_organizer.generators.markdown_generator import MarkdownGenerator
 from claude_log_organizer.storage.processed_tracker import ProcessedTracker
 from claude_log_organizer.config import Config
+from claude_log_organizer.pipeline import Pipeline, PipelineContext, build_default_pipeline
+from claude_log_organizer.pipeline.base import InvalidFileFormatError, ParsingError
 
 logger = logging.getLogger(__name__)
 
-
-class InvalidFileFormatError(Exception):
-    """Raised when file format is invalid."""
-
-    pass
-
-
-class ParsingError(Exception):
-    """Raised when parsing fails."""
-
-    pass
+# Re-exported for backward compatibility (previously defined here).
+__all__ = ["EventDispatcher", "InvalidFileFormatError", "ParsingError"]
 
 
 class EventDispatcher:
@@ -50,6 +41,9 @@ class EventDispatcher:
         self.tracker = tracker
         self.config = config
 
+        # Processing pipeline (extensible: add_step to insert custom stages)
+        self.pipeline = build_default_pipeline()
+
         # Debouncing: wait N seconds after last modification before processing
         self.debounce_delay = config.get("watch.debounce_delay", 3.0)
         self.pending_timers: Dict[str, threading.Timer] = {}
@@ -72,59 +66,25 @@ class EventDispatcher:
         self._process_with_debounce(file_path)
 
     def _process_new_file(self, file_path: Path) -> None:
-        """Process newly created log file.
+        """Process a newly created/changed log file through the pipeline.
+
+        Error-handling semantics are preserved from the original flow:
+        ParsingError marks the file processed (avoid repeated failures); all
+        other errors leave it unmarked so it can be retried.
 
         Args:
             file_path: Path to log file
         """
+        ctx = PipelineContext(
+            file_path=file_path,
+            config=self.config,
+            parser_factory=self.parser_factory,
+            generator=self.generator,
+            tracker=self.tracker,
+        )
+
         try:
-            # Validate file
-            if not self._validate_file(file_path):
-                logger.warning(f"File validation failed: {file_path}")
-                return
-
-            # Check if already processed
-            if self.tracker.is_processed(file_path):
-                logger.info(f"File already processed: {file_path}")
-                return
-
-            # Extract task ID from filename
-            task_id = self._extract_task_id(file_path)
-            if not task_id:
-                logger.error(f"Could not extract task ID from: {file_path}")
-                return
-
-            # Get appropriate parser
-            try:
-                parser = self.parser_factory.get_parser(file_path)
-            except ValueError as e:
-                logger.error(f"No parser available: {e}")
-                return
-
-            # Parse log file
-            logger.info(f"Parsing: {file_path}")
-            task_data = parser.parse(file_path)
-
-            # Generate output path (use project_path from log if available)
-            project_path = task_data.metadata.get('project_path')
-            output_path = self._get_output_path(task_id, project_path=project_path)
-
-            # Check if output already exists and overwrite is disabled
-            if output_path.exists() and not self.config.get("output.overwrite", False):
-                logger.warning(
-                    f"Output file already exists (overwrite disabled): {output_path}"
-                )
-                # Still mark as processed to avoid repeated warnings
-                self.tracker.mark_processed(file_path)
-                return
-
-            # Generate markdown
-            self.generator.generate(task_data, output_path)
-
-            # Mark as processed
-            self.tracker.mark_processed(file_path)
-
-            logger.info(f"✓ Generated: {output_path}")
+            self.pipeline.execute(ctx)
 
         except InvalidFileFormatError as e:
             logger.error(f"Invalid file format {file_path}: {e}")
@@ -180,83 +140,3 @@ class EventDispatcher:
         timer = threading.Timer(self.debounce_delay, delayed_process)
         self.pending_timers[file_key] = timer
         timer.start()
-
-    def _validate_file(self, file_path: Path) -> bool:
-        """Validate file before processing.
-
-        Args:
-            file_path: Path to file
-
-        Returns:
-            True if file is valid
-
-        Raises:
-            InvalidFileFormatError if file is invalid
-        """
-        # Check if file exists
-        if not file_path.exists():
-            raise InvalidFileFormatError(f"File does not exist: {file_path}")
-
-        # Check if file is readable
-        if not file_path.is_file():
-            raise InvalidFileFormatError(f"Not a regular file: {file_path}")
-
-        # Check minimum file size (at least 10 bytes)
-        if file_path.stat().st_size < 10:
-            logger.warning(f"File too small: {file_path}")
-            return False
-
-        # Check maximum file size (100MB)
-        max_size = 100 * 1024 * 1024
-        if file_path.stat().st_size > max_size:
-            logger.warning(f"File too large: {file_path}")
-            return False
-
-        return True
-
-    def _extract_task_id(self, file_path: Path) -> Optional[str]:
-        """Extract task ID from filename.
-
-        Args:
-            file_path: Path to log file
-
-        Returns:
-            Task ID or None if not found
-
-        Example:
-            conversation-task-20260212-130624.log -> 20260212-130624
-        """
-        # Try to match conversation-task-{id}.log pattern
-        match = re.search(r"conversation-task-(.+?)\.log", file_path.name)
-        if match:
-            return match.group(1)
-
-        # Try to match task-{id} pattern
-        match = re.search(r"task-(.+?)[-.]", file_path.name)
-        if match:
-            return match.group(1)
-
-        # Fallback: use filename without extension
-        return file_path.stem
-
-    def _get_output_path(self, task_id: str, project_path: Optional[str] = None) -> Path:
-        """Get output path for task markdown.
-
-        Args:
-            task_id: Task identifier
-            project_path: Project root path from log header (overrides config directory)
-
-        Returns:
-            Path to output markdown file
-        """
-        if project_path:
-            output_dir = Path(project_path) / "tasks"
-        else:
-            output_dir = Path(self.config.get("output.directory", "./tasks"))
-
-        filename_pattern = self.config.get(
-            "output.filename_pattern", "task-{task_id}.md"
-        )
-
-        filename = filename_pattern.format(task_id=task_id)
-        return output_dir / filename
