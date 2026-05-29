@@ -8,59 +8,15 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 
 from claude_log_organizer.models.task_data import TaskInteraction
-
-
-# ============================================================
-# Heuristic signal patterns
-# ============================================================
-
-FAILURE_SIGNALS = [
-    # Direct negation / correction
-    (r'(?:아니|아닌데|아니야|아니요|아뇨)', "부정 표현", 0.7),
-    (r'(?:그게\s*아니라|그거\s*말고)', "수정 요청", 0.8),
-    (r'(?:틀렸|잘못|잘 못)', "오류 지적", 0.9),
-    # Retry / redo requests
-    (r'(?:다시\s*(?:해|하|만들|작성|시도|해봐|해줘))', "재시도 요청", 0.85),
-    (r'(?:다시\s*확인|재확인)', "재확인 요청", 0.6),
-    # Fix / repair requests
-    (r'(?:수정해|고쳐|fix|고치|바꿔)', "수정 요청", 0.75),
-    # Error / failure mentions
-    (r'(?:에러|오류|error|실패|fail|안\s*(?:돼|되|됨|됩니다))', "에러/실패 언급", 0.8),
-    (r'(?:작동\s*안|동작\s*안|안\s*나와|안\s*보여)', "동작 불가", 0.8),
-    (r'(?:문제|이상해|이상한)', "문제 언급", 0.5),
-    # Dissatisfaction
-    (r'(?:왜\s*(?:이렇게|이런|그런|안))', "불만/의문", 0.5),
-    (r'(?:아직|여전히|계속)', "미해결 상태", 0.6),
-    # English patterns
-    (r'(?:wrong|incorrect|not\s+(?:right|correct|working))', "영문 오류 지적", 0.8),
-    (r'(?:redo|undo|revert|rollback)', "되돌리기 요청", 0.8),
-    (r'(?:broken|bug|issue)', "버그 언급", 0.6),
-]
-
-SUCCESS_SIGNALS = [
-    # Positive confirmation
-    (r'(?:좋아|좋네|좋습니다|잘\s*(?:됐|했|됨|되네))', "긍정 확인", 0.8),
-    (r'(?:감사|고마워|ㄱㅅ|ㄱㅁ|thanks|thank you|thx)', "감사 표현", 0.7),
-    (r'(?:완벽|정확|맞아|맞습니다|맞네)', "정확성 확인", 0.9),
-    (r'(?:오케이|오키|ㅇㅋ|ok|okay|굿|good|great|perfect|nice)', "승인", 0.7),
-    # Moving to next topic
-    (r'(?:이제|그러면|그럼|다음|다음으로|그 다음)', "후속 작업 전환", 0.6),
-    (r'(?:추가로|또|하나\s*더|그리고)', "추가 요청 (이전 완료 암시)", 0.5),
-    # English patterns
-    (r'(?:works|working|done|solved|resolved|fixed)', "해결 확인", 0.8),
-    (r'(?:now\s+(?:let|can|do)|next\s+(?:step|thing))', "다음 단계 전환", 0.6),
-]
-
-# Signals from tool results that indicate failure
-TOOL_ERROR_PATTERNS = [
-    (r'(?:Error|ERROR|error|Exception|Traceback)', "도구 실행 에러", 0.7),
-    (r'(?:FAILED|failed|failure)', "도구 실행 실패", 0.7),
-    (r'(?:command not found|No such file|Permission denied)', "시스템 에러", 0.6),
-]
+from claude_log_organizer.signals import SignalRegistry, get_default_registry
 
 
 class TaskSuccessAnalyzer:
     """Analyzes task interactions to determine success/failure."""
+
+    def __init__(self, signals: Optional[SignalRegistry] = None):
+        """Initialize with a signal registry (defaults to bundled signals.yaml)."""
+        self.signals = signals or get_default_registry()
 
     def extract_interactions(self, log_content: str) -> List[TaskInteraction]:
         """Extract ordered task interactions from a log file content.
@@ -165,23 +121,23 @@ class TaskSuccessAnalyzer:
         signals = []
 
         # Check failure signals in feedback
-        for pattern, label, weight in FAILURE_SIGNALS:
-            if re.search(pattern, feedback, re.IGNORECASE):
-                failure_score += weight
-                signals.append(f"[실패 시그널] {label}: /{pattern}/")
+        for sig in self.signals.failure_signals:
+            if sig.pattern.search(feedback):
+                failure_score += sig.weight
+                signals.append(f"[실패 시그널] {sig.label}: /{sig.pattern.pattern}/")
 
         # Check success signals in feedback
-        for pattern, label, weight in SUCCESS_SIGNALS:
-            if re.search(pattern, feedback, re.IGNORECASE):
-                success_score += weight
-                signals.append(f"[성공 시그널] {label}: /{pattern}/")
+        for sig in self.signals.success_signals:
+            if sig.pattern.search(feedback):
+                success_score += sig.weight
+                signals.append(f"[성공 시그널] {sig.label}: /{sig.pattern.pattern}/")
 
         # Check tool results for errors
         for result in interaction.tool_results:
-            for pattern, label, weight in TOOL_ERROR_PATTERNS:
-                if re.search(pattern, result):
-                    failure_score += weight * 0.5  # Lower weight for tool errors
-                    signals.append(f"[도구 에러] {label}")
+            for sig in self.signals.tool_error_signals:
+                if sig.pattern.search(result):
+                    failure_score += sig.weight * 0.5  # Lower weight for tool errors
+                    signals.append(f"[도구 에러] {sig.label}")
                     break
 
         # Check if feedback is a topic change (success indicator)

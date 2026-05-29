@@ -1,0 +1,57 @@
+# Signal patterns and step-classification keywords for analysis.
+#
+# This file is the bundled default. To customize without editing the package,
+# copy it to ~/.claude_log/signals.yaml (or ./signals.yaml in the project) and
+# edit there — see SignalRegistry for the lookup order.
+#
+# - failure_signals / success_signals / tool_error_signals:
+#     each entry is {pattern: <regex>, label: <kr description>, weight: <0..1>}
+#     matched case-insensitively against the user's feedback message.
+# - step_classification:
+#     keyword alternation groups (regex bodies) used to classify a process step.
+#     The precedence logic lives in code (verification → implementation, etc.).
+
+version: 1
+
+failure_signals:
+  - {pattern: '(?:아니|아닌데|아니야|아니요|아뇨)',            label: "부정 표현",     weight: 0.7}
+  - {pattern: '(?:그게\s*아니라|그거\s*말고)',                 label: "수정 요청",     weight: 0.8}
+  - {pattern: '(?:틀렸|잘못|잘 못)',                            label: "오류 지적",     weight: 0.9}
+  - {pattern: '(?:다시\s*(?:해|하|만들|작성|시도|해봐|해줘))',  label: "재시도 요청",   weight: 0.85}
+  - {pattern: '(?:다시\s*확인|재확인)',                         label: "재확인 요청",   weight: 0.6}
+  - {pattern: '(?:수정해|고쳐|fix|고치|바꿔)',                  label: "수정 요청",     weight: 0.75}
+  - {pattern: '(?:에러|오류|error|실패|fail|안\s*(?:돼|되|됨|됩니다))', label: "에러/실패 언급", weight: 0.8}
+  - {pattern: '(?:작동\s*안|동작\s*안|안\s*나와|안\s*보여)',    label: "동작 불가",     weight: 0.8}
+  - {pattern: '(?:문제|이상해|이상한)',                         label: "문제 언급",     weight: 0.5}
+  - {pattern: '(?:왜\s*(?:이렇게|이런|그런|안))',               label: "불만/의문",     weight: 0.5}
+  - {pattern: '(?:아직|여전히|계속)',                           label: "미해결 상태",   weight: 0.6}
+  - {pattern: '(?:wrong|incorrect|not\s+(?:right|correct|working))', label: "영문 오류 지적", weight: 0.8}
+  - {pattern: '(?:redo|undo|revert|rollback)',                  label: "되돌리기 요청", weight: 0.8}
+  - {pattern: '(?:broken|bug|issue)',                           label: "버그 언급",     weight: 0.6}
+
+success_signals:
+  - {pattern: '(?:좋아|좋네|좋습니다|잘\s*(?:됐|했|됨|되네))',   label: "긍정 확인",     weight: 0.8}
+  - {pattern: '(?:감사|고마워|ㄱㅅ|ㄱㅁ|thanks|thank you|thx)', label: "감사 표현",     weight: 0.7}
+  - {pattern: '(?:완벽|정확|맞아|맞습니다|맞네)',               label: "정확성 확인",   weight: 0.9}
+  - {pattern: '(?:오케이|오키|ㅇㅋ|ok|okay|굿|good|great|perfect|nice)', label: "승인",   weight: 0.7}
+  - {pattern: '(?:이제|그러면|그럼|다음|다음으로|그 다음)',     label: "후속 작업 전환", weight: 0.6}
+  - {pattern: '(?:추가로|또|하나\s*더|그리고)',                 label: "추가 요청 (이전 완료 암시)", weight: 0.5}
+  - {pattern: '(?:works|working|done|solved|resolved|fixed)',   label: "해결 확인",     weight: 0.8}
+  - {pattern: '(?:now\s+(?:let|can|do)|next\s+(?:step|thing))',  label: "다음 단계 전환", weight: 0.6}
+
+tool_error_signals:
+  - {pattern: '(?:Error|ERROR|error|Exception|Traceback)',      label: "도구 실행 에러", weight: 0.7}
+  - {pattern: '(?:FAILED|failed|failure)',                      label: "도구 실행 실패", weight: 0.7}
+  - {pattern: '(?:command not found|No such file|Permission denied)', label: "시스템 에러", weight: 0.6}
+
+# Step classification keyword groups (regex alternation bodies, matched on
+# lowercased step summary). Precedence: verification → decision → implementation
+# → summary → analysis. A verification match that also matches implementation
+# keywords is reclassified as implementation.
+step_classification:
+  verification: '확인|검증|테스트|빌드|검토|verify|test|build|check|review'
+  verification_impl_override: '수정|변경|추가|생성|구현|implement|fix|add|create'
+  decision: '결정|선택|판단|방법|접근|전략|decide|choose|approach|should|원인|발견|이슈|버그|문제|bug|issue|found'
+  implementation: '수정|변경|추가|생성|삭제|구현|적용|implement|fix|add|create|update|modify|edit|remove|이제|시작'
+  summary: '완료|정리|요약|결과|summary|complete|done|finish|결론'
+  analysis: '분석|파악|조사|읽|탐색|확인|analyze|investigate|read|explore|찾|search|살펴'

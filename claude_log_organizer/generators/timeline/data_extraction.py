@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from claude_log_organizer.models.task_data import TimelineEntry, TokenUsage
 from claude_log_organizer.generators.timeline.styles import ProcessStep
+from claude_log_organizer.signals import get_default_registry
 
 
 def parse_task_files(files: List[Path]) -> List[TimelineEntry]:
@@ -170,32 +171,8 @@ def _extract_process_steps(content: str) -> List[ProcessStep]:
 
 
 def _classify_step(summary: str, details: List[str]) -> str:
-    """Classify a process step into: analysis, decision, implementation, verification, summary."""
-    s_lower = summary.lower()
-
-    # Verification patterns
-    if re.search(r"(확인|검증|테스트|빌드|검토|verify|test|build|check|review)", s_lower):
-        if re.search(r"(수정|변경|추가|생성|구현|implement|fix|add|create)", s_lower):
-            return "implementation"
-        return "verification"
-
-    # Decision patterns
-    if re.search(r"(결정|선택|판단|방법|접근|전략|decide|choose|approach|should|원인|발견|이슈|버그|문제|bug|issue|found)", s_lower):
-        return "decision"
-
-    # Implementation patterns
-    if re.search(r"(수정|변경|추가|생성|삭제|구현|적용|implement|fix|add|create|update|modify|edit|remove|이제|시작)", s_lower):
-        return "implementation"
-
-    # Summary/completion patterns
-    if re.search(r"(완료|정리|요약|결과|summary|complete|done|finish|결론)", s_lower):
-        return "summary"
-
-    # Analysis patterns
-    if re.search(r"(분석|파악|조사|읽|탐색|확인|analyze|investigate|read|explore|찾|search|살펴)", s_lower):
-        return "analysis"
-
-    return "analysis"
+    """Classify a process step type via the externalized signal registry."""
+    return get_default_registry().classify_step(summary)
 
 
 def _extract_tools_used(content: str) -> str:
