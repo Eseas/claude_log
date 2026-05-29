@@ -6,6 +6,7 @@ from pathlib import Path
 
 from claude_log_organizer.main import LogOrganizerApp
 from claude_log_organizer.config import Config
+from claude_log_organizer.output import out
 
 
 def main():
@@ -142,10 +143,10 @@ For more information: https://github.com/yourusername/claude-log-organizer
         elif args.command == "timeline":
             handle_timeline(args)
     except KeyboardInterrupt:
-        print("\nInterrupted by user")
+        out.print("\nInterrupted by user")
         sys.exit(0)
     except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
+        out.print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
@@ -160,14 +161,14 @@ def handle_init(args):
     if output_path.exists():
         response = input(f"{output_path} already exists. Overwrite? [y/N]: ")
         if response.lower() != "y":
-            print("Cancelled")
+            out.print("Cancelled")
             return
 
     Config.create_default(output_path)
-    print(f"✓ Created config file: {output_path}")
-    print("\nNext steps:")
-    print("1. Edit config.yaml to customize settings")
-    print("2. Run 'claude-log-organizer watch' to start monitoring")
+    out.print(f"✓ Created config file: {output_path}")
+    out.print("\nNext steps:")
+    out.print("1. Edit config.yaml to customize settings")
+    out.print("2. Run 'claude-log-organizer watch' to start monitoring")
 
 
 def handle_watch(args):
@@ -179,9 +180,9 @@ def handle_watch(args):
     config_path = args.config if args.config.exists() else None
 
     if config_path is None:
-        print("Warning: Config file not found, using default settings")
-        print(f"Run 'claude-log-organizer init' to create {args.config}")
-        print()
+        out.print("Warning: Config file not found, using default settings")
+        out.print(f"Run 'claude-log-organizer init' to create {args.config}")
+        out.print()
 
     app = LogOrganizerApp(config_path)
     app.watch()
@@ -197,7 +198,7 @@ def handle_process(args):
     config_path = args.config if args.config.exists() else None
 
     if not file_path.exists():
-        print(f"Error: File not found: {file_path}", file=sys.stderr)
+        out.print(f"Error: File not found: {file_path}", file=sys.stderr)
         sys.exit(1)
 
     app = LogOrganizerApp(config_path)
@@ -215,11 +216,11 @@ def handle_batch(args):
     force = args.force
 
     if not directory.exists():
-        print(f"Error: Directory not found: {directory}", file=sys.stderr)
+        out.print(f"Error: Directory not found: {directory}", file=sys.stderr)
         sys.exit(1)
 
     if not directory.is_dir():
-        print(f"Error: Not a directory: {directory}", file=sys.stderr)
+        out.print(f"Error: Not a directory: {directory}", file=sys.stderr)
         sys.exit(1)
 
     app = LogOrganizerApp(config_path)
@@ -236,7 +237,7 @@ def handle_clear(args):
 
     response = input("Clear processed file history? This cannot be undone. [y/N]: ")
     if response.lower() != "y":
-        print("Cancelled")
+        out.print("Cancelled")
         return
 
     from claude_log_organizer.config import Config
@@ -246,7 +247,7 @@ def handle_clear(args):
     tracker = ProcessedTracker(Path(config.get("storage.processed_log")))
     tracker.clear()
 
-    print("✓ Cleared processed file history")
+    out.print("✓ Cleared processed file history")
 
 
 def handle_timeline(args):
@@ -261,7 +262,7 @@ def handle_timeline(args):
     try:
         target_date = dt_date.fromisoformat(args.date)
     except ValueError:
-        print(f"Error: Invalid date format: {args.date} (expected YYYY-MM-DD)", file=sys.stderr)
+        out.print(f"Error: Invalid date format: {args.date} (expected YYYY-MM-DD)", file=sys.stderr)
         sys.exit(1)
 
     config_path = args.config if args.config.exists() else None
@@ -292,10 +293,10 @@ def handle_timeline(args):
         task_files = sorted(output_dir.glob(f"task-{args.date}_*.md"))
 
     if not task_files:
-        print(f"No task files found for {args.date}")
+        out.print(f"No task files found for {args.date}")
         sys.exit(1)
 
-    print(f"Found {len(task_files)} task files for {args.date}")
+    out.print(f"Found {len(task_files)} task files for {args.date}")
 
     generator = TimelineDiagramGenerator()
     # Derive summaries dir from first task file's project root
@@ -308,7 +309,7 @@ def handle_timeline(args):
     output_path = summaries_dir / f"daily-{args.date}_timeline.drawio"
 
     generator.generate(task_files, f"daily-{args.date}", output_path)
-    print(f"✓ Timeline saved: {output_path}")
+    out.print(f"✓ Timeline saved: {output_path}")
 
 
 if __name__ == "__main__":

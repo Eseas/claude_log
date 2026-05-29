@@ -1,8 +1,11 @@
 """Configuration management for the log organizer."""
 
+import logging
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class Config:
@@ -71,8 +74,10 @@ class Config:
                 if user_config:
                     self._deep_merge(config, user_config)
             except Exception as e:
-                print(f"Warning: Failed to load config from {self.config_path}: {e}")
-                print("Using default configuration.")
+                logger.warning(
+                    "Failed to load config from %s: %s. Using default configuration.",
+                    self.config_path, e,
+                )
 
         return config
 
@@ -143,4 +148,4 @@ class Config:
                 indent=2,
             )
 
-        print(f"Created default configuration at: {output_path}")
+        logger.debug("Created default configuration at: %s", output_path)

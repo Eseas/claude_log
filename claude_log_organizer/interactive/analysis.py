@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 
 from claude_log_organizer.config import Config
+from claude_log_organizer.output import out
 from claude_log_organizer.interactive.file_discovery import get_summaries_dir
 
 
@@ -19,17 +20,17 @@ def request_ai_summary_by_session(sessions: dict, selected_sessions: List[str], 
     try:
         from anthropic import Anthropic
     except ImportError:
-        print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
-        print("   다음 명령으로 설치하세요: pip install anthropic\n")
+        out.print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
+        out.print("   다음 명령으로 설치하세요: pip install anthropic\n")
         return
 
     client = Anthropic(api_key=api_key)
 
-    print(f"\n⏳ {len(selected_sessions)}개 세션을 AI로 요약 중...\n")
+    out.print(f"\n⏳ {len(selected_sessions)}개 세션을 AI로 요약 중...\n")
 
     for i, session_id in enumerate(selected_sessions, 1):
         files = sessions[session_id]
-        print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
+        out.print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
 
         try:
             # Combine all files from this session
@@ -92,14 +93,14 @@ def request_ai_summary_by_session(sessions: dict, selected_sessions: List[str], 
 
             summary_path.write_text("\n".join(summary_content), encoding='utf-8')
 
-            print(f"  ✓ 요약 완료: {summary_path.name}")
+            out.print(f"  ✓ 요약 완료: {summary_path.name}")
 
         except Exception as e:
-            print(f"  ❌ 오류: {e}")
+            out.print(f"  ❌ 오류: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n✓ 완료! {len(selected_sessions)}개 세션 요약 생성됨\n")
+    out.print(f"\n✓ 완료! {len(selected_sessions)}개 세션 요약 생성됨\n")
 
 
 def request_ai_summary_with_claude_code(sessions: dict, selected_sessions: List[str], config_path: Path):
@@ -112,11 +113,11 @@ def request_ai_summary_with_claude_code(sessions: dict, selected_sessions: List[
     """
     import subprocess
 
-    print(f"\n⏳ {len(selected_sessions)}개 세션을 Claude Code로 요약 중...\n")
+    out.print(f"\n⏳ {len(selected_sessions)}개 세션을 Claude Code로 요약 중...\n")
 
     for i, session_id in enumerate(selected_sessions, 1):
         files = sessions[session_id]
-        print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
+        out.print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
 
         try:
             # Combine all files from this session
@@ -169,7 +170,7 @@ def request_ai_summary_with_claude_code(sessions: dict, selected_sessions: List[
             )
 
             if result.returncode != 0:
-                print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
+                out.print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
                 continue
 
             summary = result.stdout.strip()
@@ -193,16 +194,16 @@ def request_ai_summary_with_claude_code(sessions: dict, selected_sessions: List[
 
             summary_path.write_text("\n".join(summary_content), encoding='utf-8')
 
-            print(f"  ✓ 요약 완료: {summary_path.name}")
+            out.print(f"  ✓ 요약 완료: {summary_path.name}")
 
         except subprocess.TimeoutExpired:
-            print(f"  ❌ 시간 초과 (2분)")
+            out.print(f"  ❌ 시간 초과 (2분)")
         except Exception as e:
-            print(f"  ❌ 오류: {e}")
+            out.print(f"  ❌ 오류: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n✓ 완료! {len(selected_sessions)}개 세션 요약 생성됨\n")
+    out.print(f"\n✓ 완료! {len(selected_sessions)}개 세션 요약 생성됨\n")
 
 
 def request_efficiency_analysis_with_claude_code(sessions: dict, selected_sessions: List[str], config_path: Path):
@@ -224,11 +225,11 @@ def request_efficiency_analysis_with_claude_code(sessions: dict, selected_sessio
 
     analyzer = SessionAnalyzer()
 
-    print(f"\n⏳ {len(selected_sessions)}개 세션을 효율성 분석 중...\n")
+    out.print(f"\n⏳ {len(selected_sessions)}개 세션을 효율성 분석 중...\n")
 
     for i, session_id in enumerate(selected_sessions, 1):
         files = sessions[session_id]
-        print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
+        out.print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
 
         try:
             # Create analysis prompt using analyzer
@@ -249,7 +250,7 @@ def request_efficiency_analysis_with_claude_code(sessions: dict, selected_sessio
             )
 
             if result.returncode != 0:
-                print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
+                out.print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
                 continue
 
             analysis = result.stdout.strip()
@@ -274,16 +275,16 @@ def request_efficiency_analysis_with_claude_code(sessions: dict, selected_sessio
 
             analysis_path.write_text("\n".join(analysis_content), encoding='utf-8')
 
-            print(f"  ✓ 분석 완료: {analysis_path.name}")
+            out.print(f"  ✓ 분석 완료: {analysis_path.name}")
 
         except subprocess.TimeoutExpired:
-            print(f"  ❌ 시간 초과 (3분)")
+            out.print(f"  ❌ 시간 초과 (3분)")
         except Exception as e:
-            print(f"  ❌ 오류: {e}")
+            out.print(f"  ❌ 오류: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n✓ 완료! {len(selected_sessions)}개 세션 효율성 분석 생성됨\n")
+    out.print(f"\n✓ 완료! {len(selected_sessions)}개 세션 효율성 분석 생성됨\n")
 
 
 def request_efficiency_analysis_with_api(sessions: dict, selected_sessions: List[str], api_key: str, config_path: Path):
@@ -298,8 +299,8 @@ def request_efficiency_analysis_with_api(sessions: dict, selected_sessions: List
     try:
         from anthropic import Anthropic
     except ImportError:
-        print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
-        print("   다음 명령으로 설치하세요: pip install anthropic\n")
+        out.print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
+        out.print("   다음 명령으로 설치하세요: pip install anthropic\n")
         return
 
     import sys
@@ -313,11 +314,11 @@ def request_efficiency_analysis_with_api(sessions: dict, selected_sessions: List
     analyzer = SessionAnalyzer()
     client = Anthropic(api_key=api_key)
 
-    print(f"\n⏳ {len(selected_sessions)}개 세션을 효율성 분석 중...\n")
+    out.print(f"\n⏳ {len(selected_sessions)}개 세션을 효율성 분석 중...\n")
 
     for i, session_id in enumerate(selected_sessions, 1):
         files = sessions[session_id]
-        print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
+        out.print(f"[{i}/{len(selected_sessions)}] Session: {session_id[:8]}... ({len(files)}개 파일)")
 
         try:
             # Create analysis prompt using analyzer
@@ -355,14 +356,14 @@ def request_efficiency_analysis_with_api(sessions: dict, selected_sessions: List
 
             analysis_path.write_text("\n".join(analysis_content), encoding='utf-8')
 
-            print(f"  ✓ 분석 완료: {analysis_path.name}")
+            out.print(f"  ✓ 분석 완료: {analysis_path.name}")
 
         except Exception as e:
-            print(f"  ❌ 오류: {e}")
+            out.print(f"  ❌ 오류: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n✓ 완료! {len(selected_sessions)}개 세션 효율성 분석 생성됨\n")
+    out.print(f"\n✓ 완료! {len(selected_sessions)}개 세션 효율성 분석 생성됨\n")
 
 
 def handle_date_based_summary(task_files: List[Path], config_path: Path):
@@ -389,13 +390,13 @@ def handle_date_based_summary(task_files: List[Path], config_path: Path):
     date_groups = group_files_by_date(task_files)
 
     if not date_groups:
-        print("\n--- 날짜 형식의 task 파일이 없습니다.")
-        print("    (task-YYYY-MM-DD_HHMMSS_UUID.md 형식만 지원)\n")
+        out.print("\n--- 날짜 형식의 task 파일이 없습니다.")
+        out.print("    (task-YYYY-MM-DD_HHMMSS_UUID.md 형식만 지원)\n")
         return
 
     available_dates = sorted(date_groups.keys())
-    print(f"\n--- 사용 가능한 날짜 범위: {available_dates[0]} ~ {available_dates[-1]}")
-    print(f"    총 {len(available_dates)}일, {sum(len(v) for v in date_groups.values())}개 파일\n")
+    out.print(f"\n--- 사용 가능한 날짜 범위: {available_dates[0]} ~ {available_dates[-1]}")
+    out.print(f"    총 {len(available_dates)}일, {sum(len(v) for v in date_groups.values())}개 파일\n")
 
     # Select date mode
     date_mode = select_date_mode()
@@ -415,7 +416,7 @@ def handle_date_based_summary(task_files: List[Path], config_path: Path):
     if not selected_files:
         return
 
-    print(f"\n✓ 선택된 파일: {len(selected_files)}개")
+    out.print(f"\n✓ 선택된 파일: {len(selected_files)}개")
 
     # Reuse existing analysis type + AI method selection
     analysis_type = select_analysis_type()
@@ -470,7 +471,7 @@ def generate_timeline_diagram(files: List[Path], range_label: str, config_path: 
     """
     from claude_log_organizer.generators.timeline import TimelineDiagramGenerator
 
-    print(f"\n⏳ 타임라인 다이어그램 생성 중...\n")
+    out.print(f"\n⏳ 타임라인 다이어그램 생성 중...\n")
 
     try:
         generator = TimelineDiagramGenerator()
@@ -479,13 +480,13 @@ def generate_timeline_diagram(files: List[Path], range_label: str, config_path: 
 
         output_path = summaries_dir / f"{range_label}_timeline.drawio"
         generator.generate(files, range_label, output_path)
-        print(f"  ✓ 타임라인 저장: {output_path}")
-        print(f"    (VS Code draw.io 확장 또는 diagrams.net에서 열기)\n")
+        out.print(f"  ✓ 타임라인 저장: {output_path}")
+        out.print(f"    (VS Code draw.io 확장 또는 diagrams.net에서 열기)\n")
 
     except ValueError as e:
-        print(f"  ❌ {e}\n")
+        out.print(f"  ❌ {e}\n")
     except Exception as e:
-        print(f"  ❌ 오류: {e}")
+        out.print(f"  ❌ 오류: {e}")
         import traceback
         traceback.print_exc()
 
@@ -500,21 +501,21 @@ def generate_token_analysis(files: List[Path], range_label: str, config_path: Pa
     """
     from claude_log_organizer.generators.timeline import TimelineDiagramGenerator
 
-    print(f"\n⏳ 토큰 사용량 분석 중...\n")
+    out.print(f"\n⏳ 토큰 사용량 분석 중...\n")
 
     try:
         generator = TimelineDiagramGenerator()
         entries = generator.parse_task_files(files)
 
         if not entries:
-            print("  ❌ 분석 가능한 task 파일이 없습니다.\n")
+            out.print("  ❌ 분석 가능한 task 파일이 없습니다.\n")
             return
 
         analysis_lines = generator._analyze_token_usage(entries)
 
         if not analysis_lines:
-            print("  ℹ️  토큰 데이터가 부족하거나 고사용 세션이 없습니다.")
-            print("     (최소 2개 이상의 토큰 데이터가 있는 세션이 필요합니다)\n")
+            out.print("  ℹ️  토큰 데이터가 부족하거나 고사용 세션이 없습니다.")
+            out.print("     (최소 2개 이상의 토큰 데이터가 있는 세션이 필요합니다)\n")
             return
 
         # Build output
@@ -541,14 +542,14 @@ def generate_token_analysis(files: List[Path], range_label: str, config_path: Pa
         output_path.write_text("\n".join(content_lines), encoding="utf-8")
 
         # Also print summary to console
-        print(f"  ✓ 분석 완료: {output_path}")
-        print()
+        out.print(f"  ✓ 분석 완료: {output_path}")
+        out.print()
         for line in analysis_lines:
-            print(f"  {line}")
-        print()
+            out.print(f"  {line}")
+        out.print()
 
     except Exception as e:
-        print(f"  ❌ 오류: {e}")
+        out.print(f"  ❌ 오류: {e}")
         import traceback
         traceback.print_exc()
 
@@ -565,8 +566,8 @@ def generate_task_success_analysis(log_files: List[Path], range_label: str, conf
     from claude_log_organizer.analyzers.task_success_analyzer import TaskSuccessAnalyzer
 
     if not log_files:
-        print("\n  ❌ 분석할 로그 파일을 찾을 수 없습니다.")
-        print("     (.claude/logs/ 디렉토리에 해당 세션의 로그가 있는지 확인하세요)\n")
+        out.print("\n  ❌ 분석할 로그 파일을 찾을 수 없습니다.")
+        out.print("     (.claude/logs/ 디렉토리에 해당 세션의 로그가 있는지 확인하세요)\n")
         return
 
     # Ask whether to use AI
@@ -588,14 +589,14 @@ def generate_task_success_analysis(log_files: List[Path], range_label: str, conf
     except Exception:
         pass
 
-    print(f"\n⏳ 작업 성공/실패 분석 중... ({len(log_files)}개 로그 파일)\n")
+    out.print(f"\n⏳ 작업 성공/실패 분석 중... ({len(log_files)}개 로그 파일)\n")
 
     try:
         analyzer = TaskSuccessAnalyzer()
         all_interactions = analyzer.analyze_log_files(log_files, use_ai=use_ai)
 
         if not all_interactions:
-            print("  ❌ 분석 가능한 상호작용이 없습니다.\n")
+            out.print("  ❌ 분석 가능한 상호작용이 없습니다.\n")
             return
 
         report_lines = analyzer.generate_report(all_interactions)
@@ -629,14 +630,14 @@ def generate_task_success_analysis(log_files: List[Path], range_label: str, conf
         output_path.write_text("\n".join(content_lines), encoding="utf-8")
 
         # Print to console
-        print(f"  ✓ 분석 완료: {output_path}")
-        print()
+        out.print(f"  ✓ 분석 완료: {output_path}")
+        out.print()
         for line in report_lines:
-            print(f"  {line}")
-        print()
+            out.print(f"  {line}")
+        out.print()
 
     except Exception as e:
-        print(f"  ❌ 오류: {e}")
+        out.print(f"  ❌ 오류: {e}")
         import traceback
         traceback.print_exc()
 
@@ -735,7 +736,7 @@ def request_date_summary_with_claude_code(files: List[Path], range_label: str, c
     import subprocess
 
     display_label = range_label.replace("-", " ", 1).replace("_to_", " ~ ")
-    print(f"\n⏳ '{display_label}' 기간을 Claude Code로 요약 중...\n")
+    out.print(f"\n⏳ '{display_label}' 기간을 Claude Code로 요약 중...\n")
 
     try:
         prompt = build_date_prompt(files, range_label)
@@ -755,17 +756,17 @@ def request_date_summary_with_claude_code(files: List[Path], range_label: str, c
         )
 
         if result.returncode != 0:
-            print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
+            out.print(f"  ❌ Claude Code 실행 오류: {result.stderr}")
             return
 
         summary = result.stdout.strip()
         summary_path = save_date_summary(range_label, files, summary, config_path)
-        print(f"  ✓ 요약 완료: {summary_path.name}")
+        out.print(f"  ✓ 요약 완료: {summary_path.name}")
 
     except subprocess.TimeoutExpired:
-        print(f"  ❌ 시간 초과 (2분)")
+        out.print(f"  ❌ 시간 초과 (2분)")
     except Exception as e:
-        print(f"  ❌ 오류: {e}")
+        out.print(f"  ❌ 오류: {e}")
         import traceback
         traceback.print_exc()
 
@@ -782,13 +783,13 @@ def request_date_summary_with_api(files: List[Path], range_label: str, api_key: 
     try:
         from anthropic import Anthropic
     except ImportError:
-        print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
-        print("   다음 명령으로 설치하세요: pip install anthropic\n")
+        out.print("\n❌ anthropic 패키지가 설치되지 않았습니다.")
+        out.print("   다음 명령으로 설치하세요: pip install anthropic\n")
         return
 
     client = Anthropic(api_key=api_key)
     display_label = range_label.replace("-", " ", 1).replace("_to_", " ~ ")
-    print(f"\n⏳ '{display_label}' 기간을 API로 요약 중...\n")
+    out.print(f"\n⏳ '{display_label}' 기간을 API로 요약 중...\n")
 
     try:
         prompt = build_date_prompt(files, range_label)
@@ -804,9 +805,9 @@ def request_date_summary_with_api(files: List[Path], range_label: str, api_key: 
 
         summary = message.content[0].text
         summary_path = save_date_summary(range_label, files, summary, config_path)
-        print(f"  ✓ 요약 완료: {summary_path.name}")
+        out.print(f"  ✓ 요약 완료: {summary_path.name}")
 
     except Exception as e:
-        print(f"  ❌ 오류: {e}")
+        out.print(f"  ❌ 오류: {e}")
         import traceback
         traceback.print_exc()

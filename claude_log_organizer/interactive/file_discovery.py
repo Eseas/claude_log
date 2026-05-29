@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import inquirer
 
 from claude_log_organizer.config import Config
+from claude_log_organizer.output import out
 
 
 def format_size(size_bytes: int) -> str:
@@ -359,7 +360,7 @@ def select_custom_range(date_groups: Dict[date, List[Path]], available_dates: Li
     Returns:
         Tuple of (list of files, range label string) or (None, None)
     """
-    print(f"\n   사용 가능한 범위: {available_dates[0].isoformat()} ~ {available_dates[-1].isoformat()}\n")
+    out.print(f"\n   사용 가능한 범위: {available_dates[0].isoformat()} ~ {available_dates[-1].isoformat()}\n")
 
     try:
         start_input = input("   시작 날짜 (YYYY-MM-DD): ").strip()
@@ -368,11 +369,11 @@ def select_custom_range(date_groups: Dict[date, List[Path]], available_dates: Li
         start_date = date.fromisoformat(start_input)
         end_date = date.fromisoformat(end_input)
     except (ValueError, KeyboardInterrupt):
-        print("\n--- 잘못된 날짜 형식이거나 취소되었습니다.\n")
+        out.print("\n--- 잘못된 날짜 형식이거나 취소되었습니다.\n")
         return None, None
 
     if start_date > end_date:
-        print("\n--- 시작 날짜가 종료 날짜보다 늦습니다.\n")
+        out.print("\n--- 시작 날짜가 종료 날짜보다 늦습니다.\n")
         return None, None
 
     files = []
@@ -381,7 +382,7 @@ def select_custom_range(date_groups: Dict[date, List[Path]], available_dates: Li
             files.extend(date_groups[d])
 
     if not files:
-        print(f"\n--- {start_date.isoformat()} ~ {end_date.isoformat()} 범위에 파일이 없습니다.\n")
+        out.print(f"\n--- {start_date.isoformat()} ~ {end_date.isoformat()} 범위에 파일이 없습니다.\n")
         return None, None
 
     range_label = f"custom-{start_date.isoformat()}_to_{end_date.isoformat()}"

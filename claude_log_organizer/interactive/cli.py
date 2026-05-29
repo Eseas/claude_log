@@ -9,6 +9,7 @@ import inquirer
 
 from claude_log_organizer.main import LogOrganizerApp
 from claude_log_organizer.config import Config
+from claude_log_organizer.output import out
 
 from claude_log_organizer.interactive.file_discovery import (
     discover_project_task_files,
@@ -57,9 +58,9 @@ class InteractiveCLI:
 
     def run(self):
         """Run interactive CLI."""
-        print("\n" + "=" * 60)
-        print("Claude Log Organizer - Interactive Mode")
-        print("=" * 60 + "\n")
+        out.print("\n" + "=" * 60)
+        out.print("Claude Log Organizer - Interactive Mode")
+        out.print("=" * 60 + "\n")
 
         while True:
             choice = self.show_main_menu()
@@ -69,7 +70,7 @@ class InteractiveCLI:
             elif choice == "request_ai":
                 self.handle_ai_request_menu()
             elif choice == "exit":
-                print("\n👋 종료합니다.")
+                out.print("\n👋 종료합니다.")
                 sys.exit(0)
 
     def show_main_menu(self) -> str:
@@ -130,8 +131,8 @@ class InteractiveCLI:
         )
 
         if not task_files:
-            print("\n❌ task 파일이 없습니다.")
-            print("   먼저 로그를 처리하세요.\n")
+            out.print("\n❌ task 파일이 없습니다.")
+            out.print("   먼저 로그를 처리하세요.\n")
             return
 
         # Select grouping mode
@@ -147,7 +148,7 @@ class InteractiveCLI:
         sessions = group_files_by_session(task_files)
 
         if not sessions:
-            print("❌ 세션 정보를 추출할 수 없습니다.\n")
+            out.print("❌ 세션 정보를 추출할 수 없습니다.\n")
             return
 
         # Create choices
@@ -179,7 +180,7 @@ class InteractiveCLI:
 
         mode_answer = inquirer.prompt(mode_questions)
         if not mode_answer or mode_answer["mode"] == "cancel":
-            print("\n취소되었습니다.\n")
+            out.print("\n취소되었습니다.\n")
             return
 
         # Single or multiple selection
@@ -195,7 +196,7 @@ class InteractiveCLI:
 
             answers = inquirer.prompt(questions)
             if not answers or answers["session"] == "CANCEL":
-                print("\n취소되었습니다.\n")
+                out.print("\n취소되었습니다.\n")
                 return
 
             selected_session = answers["session"]
@@ -216,7 +217,7 @@ class InteractiveCLI:
 
             answers = inquirer.prompt(questions)
             if not answers or not answers["sessions"]:
-                print("\n취소되었습니다.\n")
+                out.print("\n취소되었습니다.\n")
                 return
 
             selected_sessions = answers["sessions"]
@@ -229,12 +230,12 @@ class InteractiveCLI:
                 selected_sessions = [s for s in selected_sessions if s != "CANCEL"]
 
             if not selected_sessions:
-                print("\n취소되었습니다.\n")
+                out.print("\n취소되었습니다.\n")
                 return
 
         # Confirm selection
         total_files = sum(len(sessions[sid]) for sid in selected_sessions)
-        print(f"\n✓ {len(selected_sessions)}개 세션 선택됨 (총 {total_files}개 파일)")
+        out.print(f"\n✓ {len(selected_sessions)}개 세션 선택됨 (총 {total_files}개 파일)")
 
         # Ask for analysis type
         analysis_type = select_analysis_type()

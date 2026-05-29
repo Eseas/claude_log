@@ -7,6 +7,7 @@ from typing import Optional
 import inquirer
 
 from claude_log_organizer.config import Config
+from claude_log_organizer.output import out
 
 
 def watch_from_config(cli):
@@ -16,7 +17,7 @@ def watch_from_config(cli):
         cli: InteractiveCLI instance
     """
     if not cli.config_path.exists():
-        print("\n❌ 설정 파일이 없습니다. 먼저 'init' 명령으로 생성하세요.")
+        out.print("\n❌ 설정 파일이 없습니다. 먼저 'init' 명령으로 생성하세요.")
         return
 
     if not cli.app:
@@ -29,17 +30,17 @@ def watch_from_config(cli):
     if isinstance(directories, str):
         directories = [directories]
 
-    print("\n📂 설정된 디렉토리:")
+    out.print("\n📂 설정된 디렉토리:")
     for i, d in enumerate(directories, 1):
-        print(f"  {i}. {Path(d).absolute()}")
+        out.print(f"  {i}. {Path(d).absolute()}")
 
-    print("\n⏳ 모니터링을 시작합니다...")
-    print("   (Ctrl+C를 눌러 중지)\n")
+    out.print("\n⏳ 모니터링을 시작합니다...")
+    out.print("   (Ctrl+C를 눌러 중지)\n")
 
     try:
         cli.app.watch()
     except KeyboardInterrupt:
-        print("\n\n✓ 모니터링을 중지했습니다.\n")
+        out.print("\n\n✓ 모니터링을 중지했습니다.\n")
 
 
 def watch_from_manual_input(cli):
@@ -50,8 +51,8 @@ def watch_from_manual_input(cli):
     """
     directories = []
 
-    print("\n📝 모니터링할 디렉토리를 입력하세요")
-    print("   (빈 값을 입력하면 완료)\n")
+    out.print("\n📝 모니터링할 디렉토리를 입력하세요")
+    out.print("   (빈 값을 입력하면 완료)\n")
 
     while True:
         try:
@@ -59,7 +60,7 @@ def watch_from_manual_input(cli):
 
             if not path:
                 if not directories:
-                    print("❌ 최소 1개 이상의 디렉토리를 입력해야 합니다.")
+                    out.print("❌ 최소 1개 이상의 디렉토리를 입력해야 합니다.")
                     continue
                 break
 
@@ -69,24 +70,24 @@ def watch_from_manual_input(cli):
                 create = input(f"⚠️  '{path_obj}'가 존재하지 않습니다. 생성하시겠습니까? (y/N): ")
                 if create.lower() == 'y':
                     path_obj.mkdir(parents=True, exist_ok=True)
-                    print(f"✓ 디렉토리 생성됨: {path_obj}")
+                    out.print(f"✓ 디렉토리 생성됨: {path_obj}")
                 else:
                     continue
 
             directories.append(str(path_obj))
-            print(f"✓ 추가됨: {path_obj}")
+            out.print(f"✓ 추가됨: {path_obj}")
 
         except KeyboardInterrupt:
-            print("\n\n취소되었습니다.\n")
+            out.print("\n\n취소되었습니다.\n")
             return
 
     if not directories:
         return
 
     # Create temporary config
-    print("\n📂 선택된 디렉토리:")
+    out.print("\n📂 선택된 디렉토리:")
     for i, d in enumerate(directories, 1):
-        print(f"  {i}. {d}")
+        out.print(f"  {i}. {d}")
 
     # Update app config temporarily
     if not cli.app:
@@ -96,8 +97,8 @@ def watch_from_manual_input(cli):
     # Temporarily override watch directories
     cli.app.config.data["watch"]["directories"] = directories
 
-    print("\n⏳ 모니터링을 시작합니다...")
-    print("   (Ctrl+C를 눌러 중지)\n")
+    out.print("\n⏳ 모니터링을 시작합니다...")
+    out.print("   (Ctrl+C를 눌러 중지)\n")
 
     # Recreate watcher with new config
     from claude_log_organizer.watcher.file_watcher import ConversationLogWatcher
@@ -106,7 +107,7 @@ def watch_from_manual_input(cli):
     try:
         cli.app.watcher.start(callback=cli.app.dispatcher.dispatch_file_event)
     except KeyboardInterrupt:
-        print("\n\n✓ 모니터링을 중지했습니다.\n")
+        out.print("\n\n✓ 모니터링을 중지했습니다.\n")
 
 
 def select_analysis_type() -> Optional[str]:
@@ -149,8 +150,8 @@ def select_ai_method() -> Optional[str]:
     claude_available = shutil.which("claude") is not None
 
     if not claude_available:
-        print("\n⚠️  Claude Code CLI를 찾을 수 없습니다.")
-        print("   API 키 방식만 사용 가능합니다.\n")
+        out.print("\n⚠️  Claude Code CLI를 찾을 수 없습니다.")
+        out.print("   API 키 방식만 사용 가능합니다.\n")
         return "api"
 
     questions = [
@@ -234,13 +235,13 @@ def get_api_key(config_path: Path) -> Optional[str]:
     api_key = config.get("ai.api_key")
 
     if not api_key:
-        print("\n🔑 Claude API 키가 필요합니다.")
-        print("   https://console.anthropic.com/account/keys 에서 발급받으세요.\n")
+        out.print("\n🔑 Claude API 키가 필요합니다.")
+        out.print("   https://console.anthropic.com/account/keys 에서 발급받으세요.\n")
 
         api_key = input("API Key: ").strip()
 
         if not api_key:
-            print("\n❌ API 키가 입력되지 않았습니다.\n")
+            out.print("\n❌ API 키가 입력되지 않았습니다.\n")
             return None
 
         # Ask to save
@@ -251,6 +252,6 @@ def get_api_key(config_path: Path) -> Optional[str]:
             import yaml
             with open(config_path, 'w') as f:
                 yaml.dump(config.data, f, default_flow_style=False, allow_unicode=True)
-            print("✓ 저장되었습니다.")
+            out.print("✓ 저장되었습니다.")
 
     return api_key
