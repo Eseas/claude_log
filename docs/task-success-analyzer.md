@@ -3,6 +3,8 @@
 > 작성일: 2026-03-17
 > 상태: Phase 1 완료 / Phase 2~5 개발 예정
 
+> **갱신 (2026-05-29):** 리팩토링 방향 6으로 시그널 패턴이 코드 밖으로 외부화됨. 아래 §2.3 B의 `FAILURE_SIGNALS`/`SUCCESS_SIGNALS`/`TOOL_ERROR_PATTERNS`는 더 이상 `task_success_analyzer.py`에 하드코딩되지 않고 `claude_log_organizer/signals.yaml`에 정의되며 `SignalRegistry`(signals.py)가 로드한다. 아래 패턴 표의 내용은 번들 기본값으로 그대로 유효하다. `TaskSuccessAnalyzer(signals=...)`로 커스텀 레지스트리 주입 가능, 사용자는 `~/.claude_log/signals.yaml`로 오버라이드 가능. 단, tool_error 패턴은 원본 동작 보존을 위해 대소문자 구분 매칭(다른 시그널은 IGNORECASE).
+
 ---
 
 ## 1. 개요

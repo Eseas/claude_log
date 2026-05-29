@@ -1,6 +1,6 @@
 # 기존 기능 정리
 
-> 최종 업데이트: 2026-03-17
+> 최종 업데이트: 2026-05-29
 
 ---
 
@@ -14,6 +14,9 @@
 | v1.0 | 2026-02-26 | Interactive CLI, 세션 기반 분석, AI 요약 |
 | v1.1 | 2026-02-27 | 타임라인 다이어그램(.drawio), 프로세스 단계 분류, AI 페이즈 요약 |
 | v1.2 | 2026-03-12 | 토큰 사용량 추적/분석, Interactive 메뉴 확장, 작업 성공/실패 분석기 |
+| 리팩토링 | 2026-05-27~29 | 구조 개선 8개 방향 (아래 §10) — God Module 분해, 테스트 인프라, 파서 통합, Hook Python화, 로깅 정비, 시그널 외부화, 파이프라인, Typer+Rich CLI |
+
+> 리팩토링 작업은 동작을 보존하며 구조만 개선했다. 상세는 `docs/refactoring-directions.md`(방향 문서)와 아래 §10 참조.
 
 ---
 
@@ -121,9 +124,9 @@
 
 **로직**: `templates/default.md.jinja2` 기반 렌더링, Config에서 템플릿 경로/이름 설정
 
-### 4.2 Timeline Diagram Generator (`generators/timeline_diagram.py`)
+### 4.2 Timeline Diagram Generator (`generators/timeline/` 패키지)
 
-**개발 시기**: v1.1 (핵심) → v1.2 (토큰 분석 추가)
+**개발 시기**: v1.1 (핵심) → v1.2 (토큰 분석 추가) → 리팩토링(1,522줄 단일 파일 → 8모듈 패키지로 분해, §10)
 
 **역할**: task-*.md 파일들 → draw.io XML (.drawio) 다이어그램
 
@@ -191,9 +194,9 @@ Stage 3: _condense_phases() — AI 불가 시 균등 분할 폴백
 
 ---
 
-## 6. Interactive CLI (`interactive.py`)
+## 6. Interactive CLI (`interactive/` 패키지)
 
-**개발 시기**: v1.0 (기본) → v1.2 (토큰 분석, 작업 성공/실패 분석 메뉴 추가)
+**개발 시기**: v1.0 (기본) → v1.2 (토큰 분석, 작업 성공/실패 분석 메뉴 추가) → 리팩토링(1,627줄 단일 파일 → cli·handlers·analysis·file_discovery 4모듈로 분해, §10). 엔트리포인트는 `cli.py`(Typer)의 무인자 실행
 
 **메뉴 구조**:
 ```
@@ -260,19 +263,63 @@ templates:
 
 ---
 
-## 9. 모듈 의존 관계
+## 9. 모듈 의존 관계 (리팩토링 후)
 
 ```
-interactive.py
-  ├── main.py (LogOrganizerApp)
-  │   ├── config.py (Config)
-  │   ├── parsers/parser_factory.py → session_parser.py
-  │   ├── generators/markdown_generator.py
-  │   ├── watcher/file_watcher.py
-  │   ├── watcher/event_dispatcher.py
-  │   └── storage/processed_tracker.py
-  ├── generators/timeline_diagram.py
-  │   └── models/task_data.py (TimelineEntry, ProcessPhase, TokenUsage)
-  └── analyzers/task_success_analyzer.py
-      └── models/task_data.py (TaskInteraction)
+cli.py (Typer 엔트리포인트)
+  ├── interactive/ (패키지: cli·handlers·analysis·file_discovery)
+  │   ├── main.py (LogOrganizerApp)
+  │   ├── generators/timeline/ (패키지)
+  │   └── analyzers/task_success_analyzer.py
+  └── main.py (LogOrganizerApp)
+        ├── config.py (Config)
+        ├── parsers/parser_factory.py → session_parser.py → parsers/extraction.py
+        ├── generators/markdown_generator.py
+        ├── watcher/file_watcher.py
+        └── watcher/event_dispatcher.py
+              └── pipeline/ (build_default_pipeline → 7 steps)
+                    ├── parser_factory / markdown_generator / processed_tracker
+                    └── pipeline/base.py (Pipeline, PipelineContext, PipelineStep)
+
+공통 인프라 (여러 모듈이 사용):
+  - output.py (OutputWriter)         ← cli, interactive 전체
+  - signals.py + signals.yaml         ← task_success_analyzer, generators/timeline/data_extraction
+  - models/task_data.py               ← parsers, generators, analyzers, pipeline
+  - hook/ (extractor·tag_formatter·state_manager)  ← .claude/hooks/save_conversation_log.py 런처
 ```
+
+### 리팩토링으로 분해된 god module
+- `interactive.py` (1,627줄) → `interactive/` 패키지 4모듈
+- `generators/timeline_diagram.py` (1,522줄) → `generators/timeline/` 패키지 8모듈
+
+---
+
+## 10. 리팩토링 (2026-05-27 ~ 05-29)
+
+`docs/refactoring-directions.md`의 8개 방향을 전부 구현. 모든 변경은 **동작 보존**(byte-identical 또는 동등) 하에 구조만 개선했고, 매 단계마다 테스트로 검증했다.
+
+| 방향 | 결과물 | 핵심 |
+|------|--------|------|
+| 1. God Module 분해 | `interactive/`, `generators/timeline/` 패키지 | 최대 모듈 1,627줄 → ~450줄 |
+| 2. 테스트 인프라 | `tests/` (200+ 테스트), `pyproject.toml` | 0 → ~65%+ 커버리지 |
+| 3. 파서 통합 | `parsers/extraction.py` | 태그/추출 정규식 공유, session_parser 422→222줄 |
+| 4. Hook Python화 | `hook/` 패키지 + `save_conversation_log.py` | jq 의존 제거, 테스트 가능. 글로벌 Stop 훅은 bash 유지 |
+| 5. 로깅 정비 | `output.py` (OutputWriter) | print() 124곳 라우팅, config 경고→logging |
+| 6. 시그널 외부화 | `signals.yaml` + `signals.py` (SignalRegistry) | 하드코딩 38패턴 → YAML, 사용자 오버라이드 가능 |
+| 7. 파이프라인 | `pipeline/` (base + steps) | 절차적 처리 → 7단계 PipelineStep, 플러그인 가능 |
+| 8. CLI/UI 현대화 | Typer CLI + Rich 출력 | argparse→Typer, OutputWriter에 table/panel/markdown |
+
+### 신규 핵심 모듈
+| 모듈 | 역할 |
+|------|------|
+| `output.py` | 사용자 대면 출력 단일 제어점. `print()`(verbatim) + `table`/`panel`/`rule`/`markdown`(Rich, 폴백 지원) |
+| `signals.py` / `signals.yaml` | `SignalRegistry` — 성공/실패 시그널·단계 분류 패턴 로드 (`./signals.yaml` → `~/.claude_log/signals.yaml` → 번들 순) |
+| `pipeline/base.py` | `Pipeline`(순차 실행+halt), `PipelineContext`(상태 운반), `PipelineStep`(ABC) |
+| `pipeline/steps.py` | 7단계: validate → dedup → task-id → parse → output-path → generate → track |
+| `parsers/extraction.py` | `TAG_PATTERNS` + `extract_by_tag`/`extract_tool_uses`/`extract_token_usage`/파일명 추출 등 |
+| `hook/` | `ConversationExtractor`·`tag_formatter`·`StateManager` — JSONL→.log (stdlib 전용) |
+
+### 설계 결정 (의도적)
+- **글로벌 Stop 훅은 bash 유지**: 사용자가 여러 프로젝트에서 로그를 수집하므로 self-contained(jq만) bash가 적합. Python 버전은 프로젝트 로컬 테스트 자산 (출력은 byte-identical 검증).
+- **inquirer 유지**: Rich는 화살표 키 리스트 선택이 없어 inquirer를 1:1 대체 불가. 선택 UX는 inquirer, 표시(display)만 Rich로 업그레이드.
+- **OutputWriter 기존 메서드 불변**: `[USER]` 등 대괄호 리터럴의 Rich 마크업 충돌을 피하려 기존 `print()`는 verbatim 유지, 구조적 출력(테이블/마크다운)에만 Rich 적용.

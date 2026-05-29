@@ -4,6 +4,21 @@
 > 현재 버전: v1.4
 > 총 코드량: ~8,100줄 (Python + Bash)
 
+> **✅ 상태 (2026-05-29): 8개 방향 전부 구현 완료.** 동작 보존하에 구조만 개선했으며 매 단계 테스트로 검증(200+ 테스트). 구현 결과 요약은 `docs/existing-features.md` §10 참조. 아래 본문은 작성 당시의 계획 원문이며 기록용으로 보존한다.
+>
+> | 방향 | 상태 | 산출물 |
+> |------|------|--------|
+> | 1 God Module 분해 | ✅ | `interactive/`, `generators/timeline/` 패키지 |
+> | 2 테스트 인프라 | ✅ | `tests/` 200+ 테스트, `pyproject.toml` |
+> | 3 파서 통합 | ✅ | `parsers/extraction.py` |
+> | 4 Hook Python화 | ✅ | `hook/` 패키지 (글로벌 훅은 bash 유지) |
+> | 5 로깅 정비 | ✅ | `output.py` OutputWriter |
+> | 6 시그널 외부화 | ✅ | `signals.yaml` + `signals.py` |
+> | 7 파이프라인 | ✅ | `pipeline/` |
+> | 8 CLI/UI 현대화 | ✅ | Typer + Rich |
+>
+> 계획과 다르게 구현된 부분: 방향 8의 inquirer는 Rich로 대체하지 않고 유지(화살표 키 선택 미지원), 표시만 Rich 업그레이드. 방향 4의 글로벌 Stop 훅은 bash 유지(다중 프로젝트 로그 수집).
+
 ---
 
 ## 목차
